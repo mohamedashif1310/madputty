@@ -1,4 +1,8 @@
-//! Serial session with the cyberpunk-aesthetic presentation layer.
+//! Serial session with AI-powered log analysis via kiro-cli.
+//!
+//! Two independent lanes:
+//! - Log pump lane: port_reader → colorizer → stdout (never blocks)
+//! - AI subsystem lane: rolling_buffer → redactor → kiro_invoker → ai_pane
 
 use std::io::{ErrorKind, Write};
 use std::path::PathBuf;
@@ -11,9 +15,11 @@ use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use serialport::{ErrorKind as SerialErrorKind, SerialPort};
 use tokio::sync::{mpsc, oneshot};
 
+use crate::ai::rolling_buffer::RollingBuffer;
+use crate::ai::AiSubsystem;
 use crate::errors::MadPuttyError;
 use crate::io::colorizer::Colorizer;
-use crate::io::keymap::{event_to_bytes, HotkeyDispatcher, HotkeyAction};
+use crate::io::keymap::{event_to_bytes, HotkeyAction, HotkeyDispatcher};
 use crate::io::stdout_sink::StdoutSink;
 use crate::serial_config::SerialConfig;
 use crate::theme::{
@@ -32,16 +38,13 @@ pub struct SessionOptions {
     pub no_ai: bool,
 }
 
-/// RAII guard that disables crossterm raw mode on drop.
 struct RawModeGuard;
-
 impl RawModeGuard {
     fn new() -> std::io::Result<Self> {
         enable_raw_mode()?;
         Ok(Self)
     }
 }
-
 impl Drop for RawModeGuard {
     fn drop(&mut self) {
         let _ = disable_raw_mode();
@@ -49,19 +52,17 @@ impl Drop for RawModeGuard {
 }
 
 fn map_open_error(err: serialport::Error, port: &str) -> MadPuttyError {
-    let msg = err.to_string();
-    let msg_lower = msg.to_lowercase();
+    let msg = err.to_string().to_lowercase();
     match err.kind() {
-        SerialErrorKind::NoDevice => MadPuttyError::PortNotFound {
-            port: port.to_string(),
-        },
-        SerialErrorKind::Io(ErrorKind::NotFound) => MadPuttyError::PortNotFound {
-            port: port.to_string(),
-        },
+        SerialErrorKind::NoDevice | SerialErrorKind::Io(ErrorKind::NotFound) => {
+            MadPuttyError::PortNotFound {
+                port: port.to_string(),
+            }
+        }
         SerialErrorKind::Io(ErrorKind::PermissionDenied) => MadPuttyError::PortBusy {
             port: port.to_string(),
         },
-        _ if msg_lower.contains("access is denied") || msg_lower.contains("in use") => {
+        _ if msg.contains("access is denied") || msg.contains("in use") => {
             MadPuttyError::PortBusy {
                 port: port.to_string(),
             }
@@ -70,7 +71,6 @@ fn map_open_error(err: serialport::Error, port: &str) -> MadPuttyError {
     }
 }
 
-/// Run a serial session on `port_name`.
 pub async fn run(
     port_name: &str,
     config: SerialConfig,
@@ -82,12 +82,25 @@ pub async fn run(
         Palette::amazon()
     };
 
-    // Pre-flight files.
+    // Detect AI subsystem
+    let ai = AiSubsystem::detect(opts.no_ai, opts.ai_timeout_seconds).await;
+    let ai_enabled = ai.enabled && ai.logged_in;
+
+    // Redaction warning
+    if opts.no_redact && ai_enabled {
+        eprintln!("⚠ redaction disabled (--no-redact) — credentials may leak to kiro-cli");
+    }
+
+    // Auto-watch warning
+    if opts.ai_watch && !ai.enabled {
+        eprintln!("⚠ --ai-watch ignored because AI is disabled");
+    }
+
+    // Pre-flight files
     let sink = match &opts.log {
         Some(path) => StdoutSink::with_log(path)?,
         None => StdoutSink::new(),
     };
-
     let send_bytes = match &opts.send {
         Some(path) => Some(std::fs::read(path).map_err(|e| MadPuttyError::SendFile {
             path: path.display().to_string(),
@@ -96,13 +109,13 @@ pub async fn run(
         None => None,
     };
 
-    // Open the port.
+    // Open port
     let mut port = config
         .builder(port_name)
         .open()
         .map_err(|e| map_open_error(e, port_name))?;
 
-    // Banner + boot sequence.
+    // Banner
     let framing = config.framing();
     if opts.plain {
         println!(
@@ -113,16 +126,16 @@ pub async fn run(
         print_banner(port_name, config.baud, &framing, &palette);
         boot_sequence(&palette, opts.plain);
         println!();
-        typewriter(
-            "▌ streaming live — press Ctrl+A then Ctrl+X to exit",
-            &palette.success,
-            Duration::from_millis(8),
-            opts.plain,
-        );
+        let hint = if ai_enabled {
+            "▌ streaming live — Ctrl+A A for AI analysis, Ctrl+A X to exit"
+        } else {
+            "▌ streaming live — press Ctrl+A then Ctrl+X to exit"
+        };
+        typewriter(hint, &palette.success, Duration::from_millis(8), opts.plain);
         println!();
     }
 
-    // Optional startup send.
+    // Startup send
     let mut initial_tx: u64 = 0;
     if let Some(bytes) = send_bytes {
         port.write_all(&bytes)?;
@@ -130,11 +143,11 @@ pub async fn run(
         initial_tx = bytes.len() as u64;
     }
 
-    // Clone port.
+    // Clone port
     let port_read = port.try_clone()?;
     let port_write = port;
 
-    // Channels + counters.
+    // Channels + counters
     let (tx_bytes, rx_bytes) = mpsc::unbounded_channel::<Vec<u8>>();
     let (tx_exit, rx_exit) = oneshot::channel::<()>();
     let (tx_reader_err, rx_reader_err) = oneshot::channel::<MadPuttyError>();
@@ -143,7 +156,22 @@ pub async fn run(
     let bytes_tx = Arc::new(AtomicU64::new(initial_tx));
     let started = Instant::now();
 
-    // Spawn Port_Reader.
+    // Rolling buffer for AI context
+    let rolling_buffer = RollingBuffer::new();
+    let rb_writer = rolling_buffer.clone();
+
+    // AI analysis channel (hotkey triggers → AI task)
+    let (tx_ai_trigger, mut rx_ai_trigger) = mpsc::channel::<AiTrigger>(4);
+
+    // Response log
+    let session_id = format!(
+        "{}-{}",
+        chrono_session_id(),
+        port_name.replace(['\\', '/', ':'], "-")
+    );
+    let mut response_log = crate::ai::response_log::ResponseLog::new(&session_id);
+
+    // Spawn Port_Reader
     let shutdown_reader = shutdown.clone();
     let bytes_rx_reader = bytes_rx.clone();
     let palette_reader = if opts.plain {
@@ -161,21 +189,23 @@ pub async fn run(
             bytes_rx_reader,
             palette_reader,
             plain,
+            rb_writer,
         );
     });
 
-    // Spawn Port_Writer.
+    // Spawn Port_Writer
     let bytes_tx_counter = bytes_tx.clone();
     let writer_handle = tokio::spawn(port_writer_loop(port_write, rx_bytes, bytes_tx_counter));
 
-    // Spawn Input_Forwarder.
+    // Spawn Input_Forwarder
     let shutdown_forwarder = shutdown.clone();
     let echo = opts.echo;
+    let tx_ai = tx_ai_trigger.clone();
     let forwarder_handle = tokio::task::spawn_blocking(move || {
-        input_forwarder_loop(tx_bytes, tx_exit, shutdown_forwarder, echo);
+        input_forwarder_loop(tx_bytes, tx_exit, shutdown_forwarder, echo, ai_enabled, tx_ai);
     });
 
-    // Spawn optional status-line refresher (only when not plain and stderr is a tty).
+    // Spawn status bar
     let status_shutdown = shutdown.clone();
     let status_bytes_rx = bytes_rx.clone();
     let status_bytes_tx = bytes_tx.clone();
@@ -197,7 +227,41 @@ pub async fn run(
         .await;
     });
 
-    // Coordinate shutdown.
+    // Spawn AI analysis consumer task
+    let ai_shutdown = shutdown.clone();
+    let ai_rb = rolling_buffer.clone();
+    let ai_no_redact = opts.no_redact;
+    let ai_handle = tokio::spawn(async move {
+        ai_consumer_loop(ai, ai_rb, &mut rx_ai_trigger, &mut response_log, ai_no_redact, ai_shutdown).await;
+    });
+
+    // Spawn auto-watch error scanner (if enabled)
+    let autowatch_handle = if opts.ai_watch && ai_enabled {
+        let aw_shutdown = shutdown.clone();
+        let aw_rb = rolling_buffer.clone();
+        let aw_tx = tx_ai_trigger.clone();
+        Some(tokio::task::spawn_blocking(move || {
+            // Auto-watch runs in the same thread as port_reader via the rolling buffer
+            // For simplicity, we poll the buffer periodically
+            let mut scanner = crate::ai::error_scanner::ErrorScanner::new();
+            let mut last_len = 0usize;
+            while !aw_shutdown.load(Ordering::Relaxed) {
+                std::thread::sleep(Duration::from_millis(500));
+                let snapshot = aw_rb.snapshot();
+                // Check new lines since last poll
+                for line in snapshot.iter().skip(last_len) {
+                    if scanner.check(line) {
+                        let _ = aw_tx.blocking_send(AiTrigger::AutoWatch);
+                    }
+                }
+                last_len = snapshot.len();
+            }
+        }))
+    } else {
+        None
+    };
+
+    // Coordinate shutdown
     let result: Result<(), MadPuttyError> = tokio::select! {
         _ = rx_exit => Ok(()),
         reader_err = rx_reader_err => {
@@ -208,14 +272,18 @@ pub async fn run(
         }
     };
 
-    // Teardown.
+    // Teardown
     shutdown.store(true, Ordering::Relaxed);
     let _ = reader_handle.await;
     let _ = forwarder_handle.await;
     let _ = writer_handle.await;
     let _ = status_handle.await;
+    let _ = ai_handle.await;
+    if let Some(h) = autowatch_handle {
+        let _ = h.await;
+    }
 
-    // Clear the status line.
+    // Clear status line
     if !opts.plain {
         eprint!("\r\x1b[2K");
         let _ = std::io::stderr().flush();
@@ -241,7 +309,99 @@ pub async fn run(
         );
     }
 
+    // AI response log notification
+    if response_log.has_entries() {
+        println!(
+            "AI responses saved to {}",
+            response_log.path().display()
+        );
+    }
+
     result
+}
+
+/// Trigger types for the AI consumer task.
+#[derive(Debug)]
+enum AiTrigger {
+    Analyze,
+    #[allow(dead_code)]
+    Question(String),
+    AutoWatch,
+}
+
+/// AI consumer loop — receives triggers, snapshots buffer, redacts, invokes kiro-cli.
+async fn ai_consumer_loop(
+    ai: AiSubsystem,
+    rb: RollingBuffer,
+    rx: &mut mpsc::Receiver<AiTrigger>,
+    response_log: &mut crate::ai::response_log::ResponseLog,
+    no_redact: bool,
+    shutdown: Arc<AtomicBool>,
+) {
+    let invoker = match ai.invoker {
+        Some(inv) => inv,
+        None => return, // AI disabled
+    };
+
+    while !shutdown.load(Ordering::Relaxed) {
+        let trigger = tokio::select! {
+            t = rx.recv() => match t {
+                Some(t) => t,
+                None => break,
+            },
+            _ = tokio::time::sleep(Duration::from_millis(100)) => continue,
+        };
+
+        // Snapshot + redact
+        let snapshot = rb.snapshot();
+        let context = snapshot.join("\n");
+        let redacted = if no_redact {
+            context
+        } else {
+            ai.redactor.redact(&context)
+        };
+
+        // Build prompt
+        let (prompt, trigger_name, question) = match &trigger {
+            AiTrigger::Analyze | AiTrigger::AutoWatch => {
+                let name = match trigger {
+                    AiTrigger::AutoWatch => "Auto-watch",
+                    _ => "Ctrl+A A",
+                };
+                (ai.build_analysis_prompt(&redacted), name, None)
+            }
+            AiTrigger::Question(q) => (
+                ai.build_question_prompt(q, &redacted),
+                "Ctrl+A Q",
+                Some(q.as_str()),
+            ),
+        };
+
+        // Invoke kiro-cli
+        match invoker.invoke(&prompt).await {
+            Ok(response) => {
+                // Print AI response below the log stream
+                let yellow = "\x1b[33;1m";
+                let reset = "\x1b[0m";
+                let dim = "\x1b[2m";
+                eprintln!();
+                eprintln!("{yellow}─── 🤖 AI Analysis ───{reset}");
+                for line in response.lines() {
+                    eprintln!("{dim}{line}{reset}");
+                }
+                eprintln!("{yellow}───────────────────────{reset}");
+                eprintln!();
+
+                // Save to response log
+                if let Err(e) = response_log.append(trigger_name, question, &response) {
+                    tracing::warn!("AI response log write failed: {e}");
+                }
+            }
+            Err(e) => {
+                eprintln!("\x1b[31;1m⚠ {e}\x1b[0m");
+            }
+        }
+    }
 }
 
 fn port_reader_loop(
@@ -252,23 +412,35 @@ fn port_reader_loop(
     bytes_rx: Arc<AtomicU64>,
     palette: Palette,
     plain: bool,
+    rolling_buffer: RollingBuffer,
 ) {
     let mut buf = [0u8; 4096];
     let mut colorizer = Colorizer::new(palette, !plain);
+    let mut line_buf = String::new();
+
     while !shutdown.load(Ordering::Relaxed) {
         match port.read(&mut buf) {
             Ok(0) => continue,
             Ok(n) => {
                 bytes_rx.fetch_add(n as u64, Ordering::Relaxed);
 
-                // Write raw bytes to the log file (if any) and colored output
-                // to stdout via the colorizer + sink.
+                // Log file (raw bytes)
                 if let Some(log) = sink.log_mut() {
                     if let Err(e) = log.write_all(&buf[..n]) {
                         let _ = err_tx.send(MadPuttyError::PortIo(e));
                         return;
                     }
                 }
+
+                // Feed to rolling buffer (line-by-line)
+                let text = String::from_utf8_lossy(&buf[..n]);
+                line_buf.push_str(&text);
+                while let Some(idx) = line_buf.find('\n') {
+                    let line: String = line_buf.drain(..=idx).collect();
+                    rolling_buffer.push(line.trim_end().to_string());
+                }
+
+                // Colorized stdout
                 let mut stdout = std::io::stdout().lock();
                 if let Err(e) = colorizer.feed(&buf[..n], &mut stdout) {
                     let _ = err_tx.send(MadPuttyError::PortIo(e));
@@ -276,7 +448,10 @@ fn port_reader_loop(
                 }
             }
             Err(e) if e.kind() == ErrorKind::TimedOut => {
-                // Flush any partial line (for prompts without newlines).
+                // Flush partial lines
+                if !line_buf.is_empty() {
+                    rolling_buffer.push(std::mem::take(&mut line_buf));
+                }
                 let mut stdout = std::io::stdout().lock();
                 let _ = colorizer.flush(&mut stdout);
                 continue;
@@ -315,6 +490,8 @@ fn input_forwarder_loop(
     exit_tx: oneshot::Sender<()>,
     shutdown: Arc<AtomicBool>,
     echo: bool,
+    ai_enabled: bool,
+    tx_ai: mpsc::Sender<AiTrigger>,
 ) {
     let _raw = match RawModeGuard::new() {
         Ok(g) => g,
@@ -325,7 +502,7 @@ fn input_forwarder_loop(
         }
     };
 
-    let mut state = HotkeyDispatcher::new(false); // AI hotkeys wired later
+    let mut state = HotkeyDispatcher::new(ai_enabled);
     let mut exit_tx = Some(exit_tx);
 
     while !shutdown.load(Ordering::Relaxed) {
@@ -372,19 +549,25 @@ fn input_forwarder_loop(
                 }
                 break;
             }
-            HotkeyAction::Continue => {}
-            // AI hotkeys — will be wired in the session integration task
-            HotkeyAction::Analyze | HotkeyAction::AskQuestion | HotkeyAction::ShowLastResponse => {
-                // TODO: wire to AI subsystem
+            HotkeyAction::Analyze => {
+                let _ = tx_ai.blocking_send(AiTrigger::Analyze);
             }
+            HotkeyAction::AskQuestion => {
+                // For now, trigger a default analysis (full question prompt requires
+                // inline input which needs the split-pane UI — deferred to UI task)
+                let _ = tx_ai.blocking_send(AiTrigger::Analyze);
+            }
+            HotkeyAction::ShowLastResponse => {
+                // Deferred to split-pane UI task (needs modal overlay)
+                eprintln!("\x1b[33m[AI] Last response view not yet implemented\x1b[0m");
+            }
+            HotkeyAction::Continue => {}
         }
     }
 
     drop(tx_bytes);
 }
 
-/// Refresh a single-line status bar on stderr every second.
-/// Uses ANSI `\r\x1b[2K` to clear and rewrite the line.
 async fn status_line_loop(
     shutdown: Arc<AtomicBool>,
     bytes_rx: Arc<AtomicU64>,
@@ -395,7 +578,6 @@ async fn status_line_loop(
 ) {
     let mut last_rx = 0u64;
     let mut interval = tokio::time::interval(Duration::from_millis(1000));
-    // Wait a bit before first draw so the banner settles.
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     while !shutdown.load(Ordering::Relaxed) {
@@ -407,11 +589,10 @@ async fn status_line_loop(
         let elapsed = started.elapsed();
         let elapsed_str = format_short_elapsed(elapsed);
 
-        // Amazon status bar: yellow background, black text.
-        let bg = "\x1b[43m"; // on yellow
-        let fg = "\x1b[30m"; // black
+        let bg = "\x1b[43m";
+        let fg = "\x1b[30m";
         let reset = "\x1b[0m";
-        let label = "\x1b[30;1m"; // bold black
+        let label = "\x1b[30;1m";
         let line = format!(
             "\r\x1b[2K{bg}{fg} ▌ {label}PORT {fg}{port}  {label}BAUD {fg}{baud}  {label}UP {fg}{elapsed_str}  {label}RX {fg}{}  {label}TX {fg}{}  {label}RATE {fg}{}/s {reset}",
             humanize_bytes(rx),
@@ -432,4 +613,13 @@ fn format_short_elapsed(d: Duration) -> String {
     } else {
         format!("{}h{:02}m", s / 3600, (s % 3600) / 60)
     }
+}
+
+fn chrono_session_id() -> String {
+    let now = std::time::SystemTime::now();
+    let secs = now
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    format!("{secs}")
 }
