@@ -1,21 +1,60 @@
-# Rust
-/target
+# Rust build artifacts
+/target/
+**/target/
 **/*.rs.bk
+*.pdb
+
+# Cargo
+# Note: Cargo.lock policy is intentionally NOT set here yet.
+# Decide per IDE task: track for binary crates, ignore for libraries.
 Cargo.lock.bak
 
-# Editor / OS
-.DS_Store
-Thumbs.db
-*.swp
-*.swo
+# Editor / IDE
 .vscode/
 .idea/
+*.swp
+*.swo
+*.swn
+*~
+.project
+.classpath
+.settings/
 
-# Local credentials / secrets
+# OS junk
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Local credentials / secrets — never commit
 *.env
-*.env.local
+.env
 .env.*
+!.env.example
 credentials.json
+*.pem
+*.key
+secrets/
+.kiro-credentials
 
-# Kiro build artifacts (keep .kiro/ for coordination but ignore cache)
+# Logs and coverage
+*.log
+*.log.*
+/logs/
+coverage/
+*.profraw
+*.profdata
+tarpaulin-report.*
+
+# Benchmark output
+/criterion/
+
+# madputty runtime output (per kiro-cli-log-analysis spec)
+/ai-responses/
+/session-logs/
+/.madputty/
+
+# Kiro local cache (keep .kiro/ tracked for coordination, ignore cache)
 .kiro/cache/
+.kiro/sessions/

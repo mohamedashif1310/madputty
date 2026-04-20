@@ -46,3 +46,20 @@ Format:
   Per-task owner in `tasks.md` can override the default.
 - Consequences: When unsure, assign to whoever is idle. Either side can reassign by flipping
   the owner field and committing — but do so BEFORE starting work to avoid overlap.
+
+## ADR: Cargo.lock policy — deferred (cli, 2026-04-20)
+
+The expanded `.gitignore` does NOT ignore `Cargo.lock`. Rationale: madputty is a
+binary crate (picocom-style serial terminal), and the Rust convention is to commit
+`Cargo.lock` for binaries to lock down reproducible builds. Leaving it out of
+`.gitignore` so it CAN be tracked when the IDE does the baseline-sources commit.
+If the IDE decides to treat this as a library or otherwise skip `Cargo.lock`,
+add `/Cargo.lock` to `.gitignore` and note it here.
+
+## ADR: fmt/test tasks blocked on baseline (cli, 2026-04-20)
+
+Tasks #14 (`cargo fmt --all`) and #15 (`cargo test --workspace`) are flipped to
+`[!]` because the project source tree is currently untracked. Running fmt now
+would produce a diff against files git has never seen, which is noise. Added
+new unowned task for "Commit baseline project sources" as the prerequisite.
+IDE should pick that up (decide Cargo.lock policy at the same time).
