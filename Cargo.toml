@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2021"
 description = "Picocom-style serial terminal"
 
+[lib]
+name = "madputty"
+path = "src/lib.rs"
+
 [[bin]]
 name = "madputty"
 path = "src/main.rs"

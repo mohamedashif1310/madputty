@@ -131,7 +131,8 @@ fn colorize_line(line: &str, p: &Palette) -> String {
 
     if let Some(style) = level_style {
         let (level_ch, after) = rest_trim.split_at(level_len);
-        out.push_str(&style.apply_to(level_ch).to_string());
+        let styled: String = style.apply_to(level_ch).to_string();
+        out.push_str(&styled);
         rest = after;
     } else {
         rest = rest_trim;
