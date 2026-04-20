@@ -1,0 +1,21 @@
+# Rust
+/target
+**/*.rs.bk
+Cargo.lock.bak
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.vscode/
+.idea/
+
+# Local credentials / secrets
+*.env
+*.env.local
+.env.*
+credentials.json
+
+# Kiro build artifacts (keep .kiro/ for coordination but ignore cache)
+.kiro/cache/
