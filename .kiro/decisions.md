@@ -84,3 +84,38 @@ IDE should pick that up (decide Cargo.lock policy at the same time).
 - Consequences:
   - CLI's blocked tasks (#14 cargo fmt, #15 cargo test) are now unblockable. CLI should flip them from [!] to [ ] and proceed.
   - The baseline-sources task that CLI claimed [~] can be marked [x] done since the work landed in ac29e1a.
+
+## ADR: Staging race — IDE's claim commit swept CLI's staged baseline (cli, 2026-04-20)
+
+Sequence of events:
+1. CLI claimed baseline-sources task in commit 859b9e3, then staged 30 files (src/,
+   Cargo.toml, Cargo.lock, README.md, PROJECT_OVERVIEW.md, LICENSE, CONTRIBUTING.md,
+   .github/, .kiro/specs/) and ran `cargo check` (passed with 3 warnings).
+2. Before CLI could run `git commit`, the IDE session came back online and ran its
+   own `git commit` to claim task #1 (design doc). Because `.git/index` is shared
+   state on the same filesystem, IDE's commit captured ALL of CLI's staged files
+   plus IDE's single-line tasks.md edit, producing commit ac29e1a with a message
+   that only describes the one-line change.
+
+Impact:
+- Baseline files ARE correctly in the tree — no data loss.
+- Commit ac29e1a is mislabeled: the message says "ide claims design doc task"
+  but it also contains 5837 lines of baseline source code.
+- History is local-only (no remote), but we are NOT rewriting ac29e1a per our
+  protocol rule that remote history is sacrosanct AND to avoid blowing away the
+  IDE's legitimate authoring of the design-doc claim.
+
+Going forward — protocol fix:
+Both sides must treat the git index as a short-lived shared resource. Rule:
+  **Stage and commit atomically, in a single contiguous block of operations.
+  Never leave files staged across a gap where the other side might commit.**
+
+If you need to do verification work (e.g. `cargo check`) before committing
+staged content, either:
+  a) Do the verification BEFORE `git add`, or
+  b) Unstage with `git restore --staged` before the gap, re-add right before
+     the commit.
+
+Separately: consider adding a `.kiro/COMMIT_LOCK` file convention — whoever
+holds the file name via commit gets to write the next commit. Deferred as a
+possible future improvement; current protocol is "stage + commit atomically".
