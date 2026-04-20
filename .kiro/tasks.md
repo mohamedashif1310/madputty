@@ -45,7 +45,7 @@ so the other side sees them on the next pull.
 ### Cross-cutting / hygiene
 
 - [x] (cli) Configure `.gitignore` for Rust target dir, editor junk, local creds. files: `.gitignore` — expanded to cover Rust/Cargo, editors, OS junk, secrets (pem/key/env), logs, criterion, madputty runtime dirs (`/ai-responses/`, `/session-logs/`, `/.madputty/`), and `.kiro/cache` + `.kiro/sessions`. Cargo.lock policy intentionally deferred to IDE (see decisions.md).
-- [ ] (cli) Run `cargo fmt --all` once and commit a baseline. files: whole repo (format-only)
+- [x] (cli) Run `cargo fmt --all` once and commit a baseline. files: whole repo (format-only) — fmt touched src/list.rs, src/main.rs, src/session.rs, src/theme.rs. Exit 0.
 - [ ] (cli) Verify `cargo test --workspace` passes from a clean checkout. files: none (verification)
 - [x] (cli) Commit baseline project sources (src/, Cargo.toml, Cargo.lock, README.md, PROJECT_OVERVIEW.md, LICENSE, CONTRIBUTING.md, .github/, .kiro/specs/) — files landed in commit ac29e1a. NOTE: staging race with IDE caused my staged content to be included in IDE's claim commit; see race ADR in decisions.md. Content is correct; Cargo.lock tracked per binary convention. `cargo check` passes (3 pre-existing warnings in src/theme.rs).
 - [ ] (ide) Update `README.md` with new `--ai-*` flags, hotkey table, and kiro-cli setup section. files: `README.md`

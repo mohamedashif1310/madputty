@@ -36,7 +36,11 @@ async fn main() {
         Ok(()) => std::process::exit(ExitCode::Success as i32),
         Err(err) => {
             let red = Style::new().red().bold();
-            eprintln!("\n  {}  {}\n", red.apply_to("✗"), red.apply_to(format!("{err}")));
+            eprintln!(
+                "\n  {}  {}\n",
+                red.apply_to("✗"),
+                red.apply_to(format!("{err}"))
+            );
             std::process::exit(err.exit_code() as i32);
         }
     }

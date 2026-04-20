@@ -17,10 +17,7 @@ pub fn run(plain: bool) -> Result<(), MadPuttyError> {
         if plain {
             println!("No COM ports found");
         } else {
-            println!(
-                "\n  {}  No COM ports found\n",
-                palette.error.apply_to("✗")
-            );
+            println!("\n  {}  No COM ports found\n", palette.error.apply_to("✗"));
         }
         return Ok(());
     }

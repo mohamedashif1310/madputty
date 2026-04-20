@@ -141,10 +141,7 @@ pub fn print_banner(port: &str, baud: u32, framing: &str, palette: &Palette) {
         let _ = term.write_line(&palette.logo_yellow.apply_to(*line).to_string());
     }
 
-    let _ = term.write_line(&format!(
-        "  {}",
-        palette.tagline.apply_to(TAGLINE)
-    ));
+    let _ = term.write_line(&format!("  {}", palette.tagline.apply_to(TAGLINE)));
     let _ = term.write_line("");
 
     // Info box in yellow border, white values.
@@ -173,10 +170,7 @@ pub fn print_banner(port: &str, baud: u32, framing: &str, palette: &Palette) {
         palette.key_hint.apply_to("Ctrl+A"),
         palette.key_hint.apply_to("Ctrl+X"),
     );
-    let _ = term.write_line(&format!(
-        "{} {:<57} {}",
-        edge_l, exit_hint, edge_r
-    ));
+    let _ = term.write_line(&format!("{} {:<57} {}", edge_l, exit_hint, edge_r));
 
     let _ = term.write_line(&palette.border.apply_to(bot).to_string());
     let _ = term.write_line("");

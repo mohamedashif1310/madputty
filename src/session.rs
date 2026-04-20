@@ -219,7 +219,11 @@ pub async fn run(
 
     if let Err(err) = &result {
         let red = console::Style::new().red().bold();
-        eprintln!("\n  {}  {}", red.apply_to("✗"), red.apply_to(format!("{err}")));
+        eprintln!(
+            "\n  {}  {}",
+            red.apply_to("✗"),
+            red.apply_to(format!("{err}"))
+        );
     }
 
     if !opts.plain {
