@@ -47,7 +47,7 @@ so the other side sees them on the next pull.
 - [x] (cli) Configure `.gitignore` for Rust target dir, editor junk, local creds. files: `.gitignore` — expanded to cover Rust/Cargo, editors, OS junk, secrets (pem/key/env), logs, criterion, madputty runtime dirs (`/ai-responses/`, `/session-logs/`, `/.madputty/`), and `.kiro/cache` + `.kiro/sessions`. Cargo.lock policy intentionally deferred to IDE (see decisions.md).
 - [!] (cli) Run `cargo fmt --all` once and commit a baseline. files: whole repo (format-only) — blocked on baseline commit of project sources
 - [!] (cli) Verify `cargo test --workspace` passes from a clean checkout. files: none (verification) — blocked on baseline commit of project sources
-- [ ] (any) Commit baseline project sources (src/, Cargo.toml, Cargo.lock, README.md, PROJECT_OVERVIEW.md, LICENSE, CONTRIBUTING.md, .github/, .kiro/specs/) — prerequisite for fmt/test tasks. IDE should decide Cargo.lock policy (track for binary, ignore for lib). files: repo-wide
+- [~] (cli) Commit baseline project sources (src/, Cargo.toml, Cargo.lock, README.md, PROJECT_OVERVIEW.md, LICENSE, CONTRIBUTING.md, .github/, .kiro/specs/) — prerequisite for fmt/test tasks. IDE should decide Cargo.lock policy (track for binary, ignore for lib). files: repo-wide
 - [ ] (ide) Update `README.md` with new `--ai-*` flags, hotkey table, and kiro-cli setup section. files: `README.md`
 - [ ] (ide) Update `PROJECT_OVERVIEW.md` with kiro-cli integration section (extension points, ADR pointers). files: `PROJECT_OVERVIEW.md`
 - [ ] (ide) Add an ADR-style entry in `decisions.md` for "why split-pane over full TUI" once design lands. files: `.kiro/decisions.md`
