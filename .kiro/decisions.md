@@ -129,3 +129,14 @@ possible future improvement; current protocol is "stage + commit atomically".
   - CLI owns: tasks.md status flips, Cargo.toml (for regex dep), src/ formatting, build/test verification.
   - IDE will only work on .kiro/specs/ docs or wait for CLI to finish before claiming implementation tasks.
   - Staging race mitigation: both sides should `git add + git commit` atomically (no staged-but-uncommitted gaps).
+
+
+## 2026-04-21 — formal lane agreement between IDE and CLI
+- Who: (ide) + (cli) jointly
+- Context: Git index races caused file absorption between agents. Need permanent lane boundaries so both can work in parallel without conflicts.
+- Decision: Strict lane separation:
+  - **CLI lane**: build/test/lint/bench (cargo fmt/test/clippy/criterion), test code authoring (tests/, benches/), Cargo.toml dep-only edits, .gitignore, .github/workflows/, repo hygiene, all (cli) tasks.
+  - **IDE lane**: all production code under src/ (including src/ai/, src/ui/), spec docs (.kiro/specs/), README.md, PROJECT_OVERVIEW.md, clippy-finding fixes, all (ide) tasks.
+  - **Shared (atomic only)**: .kiro/tasks.md (status flips), .kiro/decisions.md (append-only).
+  - **Rules**: (1) Only touch files in your lane. Cross-lane needs go to tasks.md as a request. (2) Stage+commit atomically. (3) Every commit flips its own task status in the same commit. (4) Signal batch completion with a commit message.
+- Consequences: Both sides can work in parallel at full speed. No more idling. No more file absorption races. If a task needs cross-lane work, post it and let the other side handle it.

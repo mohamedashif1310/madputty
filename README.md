@@ -53,6 +53,49 @@ madputty COM3 --verbose
 
 Press **Ctrl+A** then **Ctrl+X** to close the port and exit. A lone Ctrl+A followed by any other key forwards both bytes to the device unchanged.
 
+## AI-Powered Log Analysis (via kiro-cli)
+
+When `kiro-cli` is installed and you're logged in, madputty adds a split-pane AI analysis feature:
+
+```powershell
+# Connect with AI auto-watch (triggers on error keywords)
+madputty COM70 --baud 921600 --ai-watch
+
+# Connect normally, use hotkeys for on-demand analysis
+madputty COM70 --baud 921600
+
+# Login to kiro-cli (one-time setup)
+madputty kiro-login
+
+# Check kiro-cli status
+madputty kiro-status
+```
+
+### AI Hotkeys (during a session)
+
+| Hotkey | Action |
+| --- | --- |
+| **Ctrl+A A** | Analyze last 50 log lines with AI |
+| **Ctrl+A Q** | Ask a custom question about the logs |
+| **Ctrl+A L** | Show full last AI response (scrollable) |
+| **Ctrl+A X** | Exit session |
+
+### AI Flags
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--ai-watch` | off | Auto-trigger AI on error keywords |
+| `--ai-timeout-seconds` | `30` | Timeout for each AI call |
+| `--no-redact` | off | Disable credential redaction (with warning) |
+| `--no-ai` | off | Force AI off even if kiro-cli is installed |
+
+### How it works
+
+- Terminal splits: top ~80% shows live logs (never stops), bottom ~20% shows AI analysis
+- Credentials (passwords, tokens, IPs, MACs, SSIDs) are redacted before sending to AI
+- AI responses are saved to `~/.madputty/ai-responses/<session_id>.md`
+- If kiro-cli is not installed, madputty works exactly like before (no AI, no split pane)
+
 ## Exit codes
 
 | Code | Meaning |

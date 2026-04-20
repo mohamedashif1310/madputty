@@ -532,3 +532,67 @@ When starting a new project inspired by MadPutty, remember these core architectu
 ---
 
 **End of overview.** This document captures the complete design and implementation of MadPutty. Use it as a reference when building related projects or extending this one.
+
+
+---
+
+## 25. Kiro CLI Integration (AI-Powered Log Analysis)
+
+### What it adds
+
+A split-pane AI analysis feature that runs alongside the live serial log stream. When `kiro-cli` is installed and the user is logged in, madputty divides the terminal into two independent regions:
+
+- **Top ~80%**: Live log stream (never stops, never blocks)
+- **Bottom ~20%**: AI analysis pane showing kiro-cli's interpretation of recent logs
+
+### Architecture: Two-Lane Design
+
+```
+Log Pump Lane (never blocks):
+  COM port → port_reader → Colorizer → SplitPaneRenderer → Log_Region
+                                    ↓
+                              Rolling_Buffer (last 50 lines)
+                                    ↓ (try_send, drop on full)
+AI Subsystem Lane (independent):
+  ErrorScanner → Redactor → KiroInvoker → AI_Pane
+```
+
+The two lanes share exactly one piece of state: the `Rolling_Buffer` (Arc<Mutex<VecDeque>>). The log pump writes to it; the AI subsystem reads snapshots from it. The connection between them is a bounded `mpsc::channel(32)` with `try_send` semantics — if the AI side is slow, lines are dropped from the AI path but continue flowing to stdout and the log file.
+
+### Key modules
+
+| Module | Purpose |
+|--------|---------|
+| `src/ai/mod.rs` | AiSubsystem orchestrator, kiro-cli detection |
+| `src/ai/redactor.rs` | 6-pattern credential redaction (idempotent) |
+| `src/ai/kiro_invoker.rs` | Shell out to kiro-cli with timeout |
+| `src/ai/rolling_buffer.rs` | Thread-safe 50-line rolling buffer |
+| `src/ai/error_scanner.rs` | Error keyword detection with 30s debounce |
+| `src/ai/pane.rs` | AI pane state management |
+| `src/ai/response_log.rs` | Append-only Markdown response log |
+| `src/ui/split_pane.rs` | ANSI scroll region renderer |
+| `src/io/keymap.rs` | HotkeyDispatcher (Ctrl+A A/Q/L/X) |
+
+### Hotkeys
+
+- `Ctrl+A A` — Analyze last 50 lines
+- `Ctrl+A Q` — Ask a custom question
+- `Ctrl+A L` — Show full last response
+- `Ctrl+A X` — Exit session (unchanged)
+
+### Graceful degradation
+
+- No kiro-cli → serial terminal works exactly as before, no split pane
+- kiro-cli installed but not logged in → split pane shown, hotkeys show login prompt
+- `--no-ai` flag → force AI off for scripting/CI
+
+### Security boundary
+
+All log content passes through the `Redactor` before any kiro-cli call. Patterns: passwords, tokens, IPv4, MAC addresses, SSIDs, API/secret/access keys. Redaction is idempotent.
+
+### ADR references
+
+- `.kiro/decisions.md` — "why split-pane over full TUI"
+- `.kiro/decisions.md` — "formal lane agreement between IDE and CLI"
+- `.kiro/specs/kiro-cli-log-analysis/requirements.md` — 18 requirements
+- `.kiro/specs/kiro-cli-log-analysis/design.md` — full architecture with sequence diagrams
