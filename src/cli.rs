@@ -52,6 +52,22 @@ pub struct Cli {
     #[arg(long)]
     pub plain: bool,
 
+    /// Enable automatic AI analysis on error detection.
+    #[arg(long)]
+    pub ai_watch: bool,
+
+    /// AI call timeout in seconds (default 30).
+    #[arg(long, default_value_t = 30)]
+    pub ai_timeout_seconds: u32,
+
+    /// Disable credential redaction before AI calls (with warning).
+    #[arg(long)]
+    pub no_redact: bool,
+
+    /// Force AI features off even if kiro-cli is installed.
+    #[arg(long)]
+    pub no_ai: bool,
+
     /// Enable debug-level tracing on stderr.
     #[arg(long, global = true)]
     pub verbose: bool,
@@ -64,6 +80,10 @@ pub struct Cli {
 pub enum Subcmd {
     /// List available COM ports and exit.
     List,
+    /// Log in to kiro-cli for AI features.
+    KiroLogin,
+    /// Show kiro-cli login status.
+    KiroStatus,
 }
 
 #[derive(Copy, Clone, Debug, ValueEnum)]

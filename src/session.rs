@@ -13,7 +13,7 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::errors::MadPuttyError;
 use crate::io::colorizer::Colorizer;
-use crate::io::keymap::{event_to_bytes, ExitStateMachine, ForwardOutcome};
+use crate::io::keymap::{event_to_bytes, HotkeyDispatcher, HotkeyAction};
 use crate::io::stdout_sink::StdoutSink;
 use crate::serial_config::SerialConfig;
 use crate::theme::{
@@ -26,6 +26,10 @@ pub struct SessionOptions {
     pub send: Option<PathBuf>,
     pub echo: bool,
     pub plain: bool,
+    pub ai_watch: bool,
+    pub ai_timeout_seconds: u32,
+    pub no_redact: bool,
+    pub no_ai: bool,
 }
 
 /// RAII guard that disables crossterm raw mode on drop.
@@ -321,7 +325,7 @@ fn input_forwarder_loop(
         }
     };
 
-    let mut state = ExitStateMachine::new();
+    let mut state = HotkeyDispatcher::new(false); // AI hotkeys wired later
     let mut exit_tx = Some(exit_tx);
 
     while !shutdown.load(Ordering::Relaxed) {
@@ -352,7 +356,7 @@ fn input_forwarder_loop(
         }
 
         match state.feed(&bytes) {
-            ForwardOutcome::Bytes(v) => {
+            HotkeyAction::Forward(v) => {
                 if echo {
                     let mut out = std::io::stdout().lock();
                     let _ = out.write_all(&v);
@@ -362,13 +366,17 @@ fn input_forwarder_loop(
                     break;
                 }
             }
-            ForwardOutcome::ExitRequested => {
+            HotkeyAction::Exit => {
                 if let Some(tx) = exit_tx.take() {
                     let _ = tx.send(());
                 }
                 break;
             }
-            ForwardOutcome::Continue => {}
+            HotkeyAction::Continue => {}
+            // AI hotkeys — will be wired in the session integration task
+            HotkeyAction::Analyze | HotkeyAction::AskQuestion | HotkeyAction::ShowLastResponse => {
+                // TODO: wire to AI subsystem
+            }
         }
     }
 

@@ -1,3 +1,4 @@
+mod ai;
 mod cli;
 mod errors;
 mod io;
@@ -5,6 +6,7 @@ mod list;
 mod serial_config;
 mod session;
 mod theme;
+mod ui;
 
 use clap::Parser;
 use console::Style;
@@ -47,8 +49,13 @@ async fn main() {
 }
 
 async fn dispatch(cli: Cli) -> Result<(), MadPuttyError> {
-    if cli.list || matches!(cli.command, Some(Subcmd::List)) {
-        return list::run(cli.plain);
+    // Subcommand dispatch
+    match &cli.command {
+        Some(Subcmd::List) => return list::run(cli.plain),
+        Some(Subcmd::KiroLogin) => return kiro_login().await,
+        Some(Subcmd::KiroStatus) => return kiro_status().await,
+        None if cli.list => return list::run(cli.plain),
+        None => {}
     }
 
     let port_name = match &cli.port {
@@ -61,13 +68,52 @@ async fn dispatch(cli: Cli) -> Result<(), MadPuttyError> {
         }
     };
 
+    // Warn about conflicting flags
+    if cli.no_ai && (cli.ai_watch || cli.no_redact) {
+        eprintln!("⚠ --no-ai overrides other AI flags");
+    }
+
     let config = SerialConfig::from(&cli);
     let opts = SessionOptions {
         log: cli.log.clone(),
         send: cli.send.clone(),
         echo: cli.echo,
         plain: cli.plain,
+        ai_watch: cli.ai_watch,
+        ai_timeout_seconds: cli.ai_timeout_seconds,
+        no_redact: cli.no_redact,
+        no_ai: cli.no_ai,
     };
 
     session::run(&port_name, config, opts).await
+}
+
+/// Delegate to `kiro-cli login` with inherited stdio.
+async fn kiro_login() -> Result<(), MadPuttyError> {
+    let kiro_path = ai::find_kiro_cli_or_error()?;
+    let status = std::process::Command::new(&kiro_path)
+        .arg("login")
+        .status()
+        .map_err(|e| MadPuttyError::AiError(format!("failed to run kiro-cli login: {e}")))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(MadPuttyError::AiError("kiro-cli login failed".to_string()))
+    }
+}
+
+/// Delegate to `kiro-cli whoami --no-interactive`.
+async fn kiro_status() -> Result<(), MadPuttyError> {
+    let kiro_path = ai::find_kiro_cli_or_error()?;
+    let status = std::process::Command::new(&kiro_path)
+        .args(["whoami", "--no-interactive"])
+        .status()
+        .map_err(|e| MadPuttyError::AiError(format!("failed to run kiro-cli whoami: {e}")))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(MadPuttyError::AiError(
+            "kiro-cli: not logged in".to_string(),
+        ))
+    }
 }

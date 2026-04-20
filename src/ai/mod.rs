@@ -107,6 +107,13 @@ fn find_kiro_cli() -> Option<PathBuf> {
     None
 }
 
+/// Public helper for subcommand dispatch — returns error if kiro-cli not found.
+pub fn find_kiro_cli_or_error() -> Result<PathBuf, crate::errors::MadPuttyError> {
+    find_kiro_cli().ok_or_else(|| {
+        crate::errors::MadPuttyError::AiError("kiro-cli not found on PATH".to_string())
+    })
+}
+
 /// Probe login state by running `kiro-cli whoami --no-interactive` with a 5s timeout.
 async fn check_login(kiro_path: &PathBuf) -> bool {
     let result = tokio::time::timeout(

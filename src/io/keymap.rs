@@ -1,47 +1,69 @@
-//! Keyboard input translation and Ctrl+A Ctrl+X exit state machine.
+//! Keyboard input translation and hotkey dispatch.
 //!
-//! The state machine implements Requirement 4: Ctrl+A (0x01) alone arms, a
-//! subsequent Ctrl+X (0x18) requests exit, any other subsequent byte forwards
-//! both the held Ctrl+A and the new byte in order.
+//! `HotkeyDispatcher` extends the original Ctrl+A Ctrl+X exit state machine
+//! with AI hotkeys: Ctrl+A A (analyze), Ctrl+A Q (question), Ctrl+A L (last).
+//! When AI is disabled, the AI hotkeys fall through as forwarded bytes.
 
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 
 const CTRL_A: u8 = 0x01;
 const CTRL_X: u8 = 0x18;
 
+/// Actions the hotkey dispatcher can produce.
 #[derive(Debug, PartialEq, Eq)]
-pub enum ForwardOutcome {
-    Bytes(Vec<u8>),
-    ExitRequested,
+pub enum HotkeyAction {
+    /// Normal bytes to forward to the serial port.
+    Forward(Vec<u8>),
+    /// Ctrl+A X — terminate the session.
+    Exit,
+    /// Ctrl+A A — trigger AI analysis of recent logs.
+    Analyze,
+    /// Ctrl+A Q — open the custom question prompt.
+    AskQuestion,
+    /// Ctrl+A L — show the last full AI response.
+    ShowLastResponse,
+    /// Non-key event or empty input, ignore.
     Continue,
 }
 
-#[derive(Debug, Default)]
-pub struct ExitStateMachine {
+/// Prefix-dispatch state machine for Ctrl+A hotkeys.
+///
+/// When `ai_enabled` is false, only Ctrl+A X (exit) is recognized;
+/// A/Q/L fall through as forwarded bytes.
+#[derive(Debug)]
+pub struct HotkeyDispatcher {
     armed: bool,
+    ai_enabled: bool,
 }
 
-impl ExitStateMachine {
-    pub fn new() -> Self {
-        Self { armed: false }
+impl HotkeyDispatcher {
+    pub fn new(ai_enabled: bool) -> Self {
+        Self {
+            armed: false,
+            ai_enabled,
+        }
     }
 
-    /// Feed a byte slice through the state machine. Returns the bytes that
-    /// should be forwarded to the port, or `ExitRequested` when the
-    /// Ctrl+A Ctrl+X sequence completes.
-    pub fn feed(&mut self, bytes: &[u8]) -> ForwardOutcome {
+    /// Feed a byte slice through the state machine.
+    pub fn feed(&mut self, bytes: &[u8]) -> HotkeyAction {
         if bytes.is_empty() {
-            return ForwardOutcome::Continue;
+            return HotkeyAction::Continue;
         }
         let mut out = Vec::with_capacity(bytes.len() + 1);
         for &b in bytes {
             if self.armed {
                 self.armed = false;
-                if b == CTRL_X {
-                    return ForwardOutcome::ExitRequested;
+                match b {
+                    CTRL_X => return HotkeyAction::Exit,
+                    b'a' | b'A' if self.ai_enabled => return HotkeyAction::Analyze,
+                    b'q' | b'Q' if self.ai_enabled => return HotkeyAction::AskQuestion,
+                    b'l' | b'L' if self.ai_enabled => return HotkeyAction::ShowLastResponse,
+                    _ => {
+                        // Not a recognized hotkey — forward both bytes
+                        out.push(CTRL_A);
+                        out.push(b);
+                    }
                 }
-                out.push(CTRL_A);
-                out.push(b);
             } else if b == CTRL_A {
                 self.armed = true;
             } else {
@@ -49,15 +71,18 @@ impl ExitStateMachine {
             }
         }
         if out.is_empty() {
-            ForwardOutcome::Continue
+            HotkeyAction::Continue
         } else {
-            ForwardOutcome::Bytes(out)
+            HotkeyAction::Forward(out)
         }
     }
 }
 
+// Keep backward compat aliases
+pub type ForwardOutcome = HotkeyAction;
+pub type ExitStateMachine = HotkeyDispatcher;
+
 /// Translate a crossterm `Event` into the bytes a serial device expects.
-/// Non-key events (resize, focus, paste, mouse) return an empty vector.
 pub fn event_to_bytes(event: &Event) -> Vec<u8> {
     match event {
         Event::Key(key) => key_event_to_bytes(key),

@@ -35,6 +35,9 @@ pub enum MadPuttyError {
 
     #[error("Invalid argument: {0}")]
     InvalidArg(String),
+
+    #[error("AI error: {0}")]
+    AiError(String),
 }
 
 /// Process exit codes used by the binary.
