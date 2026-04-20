@@ -17,6 +17,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 serialport = "4"
 crossterm = "0.27"
+regex = "1"
 
 [dev-dependencies]
 proptest = "1"

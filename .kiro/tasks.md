@@ -36,7 +36,7 @@ so the other side sees them on the next pull.
 - [ ] (ide) Wire hotkeys Ctrl+A A, Ctrl+A Q, Ctrl+A L into keymap + session. files: `src/io/keymap.rs`, `src/session.rs`
 - [ ] (ide) Add `--ai-watch`, `--ai-timeout-seconds`, `--no-redact`, `--no-ai` flags + `kiro-login`/`kiro-status` subcommands. files: `src/cli.rs`, `src/main.rs`
 - [ ] (ide) AI response persistence — write `~/.madputty/ai-responses/<session_id>.md`. files: `src/ai/response_log.rs`
-- [ ] (cli) Add `regex = "1"` to Cargo.toml and run `cargo check --all-features` to confirm clean build after ai module lands. files: `Cargo.toml`, `Cargo.lock`
+- [x] (cli) Add `regex = "1"` to Cargo.toml and run `cargo check --all-features` to confirm clean build after ai module lands. files: `Cargo.toml`, `Cargo.lock` — regex = "1" added to [dependencies]. `cargo check --all-features` exit 0. Same 3 pre-existing warnings.
 - [ ] (cli) Run `cargo clippy -- -D warnings` across the repo after each ai module commit; file findings back. files: n/a (read-only analysis)
 - [ ] (cli) Property-test the redaction engine with proptest — idempotence, leak prevention. files: `tests/redaction_properties.rs`
 - [ ] (cli) Integration test for non-blocking log pump — spawn madputty in plain mode, assert bytes keep flowing while a mock slow AI task runs. files: `tests/integration/non_blocking_pump.rs`
