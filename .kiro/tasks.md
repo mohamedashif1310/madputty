@@ -38,9 +38,11 @@ so the other side sees them on the next pull.
 - [x] (ide) AI response persistence — write `~/.madputty/ai-responses/<session_id>.md`. files: `src/ai/response_log.rs` — DONE: append-only Markdown with timestamp headers.
 - [x] (cli) Add `regex = "1"` to Cargo.toml and run `cargo check --all-features` to confirm clean build after ai module lands. files: `Cargo.toml`, `Cargo.lock` — regex = "1" added to [dependencies]. `cargo check --all-features` exit 0. Same 3 pre-existing warnings.
 - [x] (cli) Run `cargo clippy -- -D warnings` across the repo after each ai module commit; file findings back. files: n/a (read-only analysis) — 5 findings filed below under "Clippy findings (2026-04-20)". 3 warnings pre-existing in theme.rs, 2 new in colorizer.rs. All are (ide) territory to fix.
-- [ ] (cli) Property-test the redaction engine with proptest — idempotence, leak prevention. files: `tests/redaction_properties.rs`
-- [ ] (cli) Integration test for non-blocking log pump — spawn madputty in plain mode, assert bytes keep flowing while a mock slow AI task runs. files: `tests/integration/non_blocking_pump.rs`
-- [ ] (cli) Benchmark split-pane redraw cost at 921600 baud to confirm no visible lag. files: `benches/redraw.rs`
+- [!] (cli) Property-test the redaction engine with proptest — idempotence, leak prevention. files: `tests/redaction_properties.rs` — blocked on (ide) lib-exposure task below
+- [!] (cli) Integration test for non-blocking log pump — spawn madputty in plain mode, assert bytes keep flowing while a mock slow AI task runs. files: `tests/non_blocking_pump.rs` — harness file authored and committed. Execution blocked: main crate does not compile at HEAD. See "Build breakage" section below for findings filed for (ide). Harness will run once build is green.
+- [!] (cli) Benchmark split-pane redraw cost at 921600 baud to confirm no visible lag. files: `benches/redraw.rs` — blocked on (ide) lib-exposure task below
+- [ ] (ide) Expose internals via `[lib]` target so integration tests/benches can import `madputty::ai::*` and `madputty::ui::*`. Add `[lib] path = "src/lib.rs"` or convert `main.rs` to a thin shim. Required to unblock proptest (#10) and criterion bench (#12). files: `Cargo.toml`, new `src/lib.rs` (or refactor `src/main.rs`)
+- [ ] (ide) Extract a `SerialPort`-like trait or factory so integration tests can inject a mock duplex stream for the non-blocking-pump test body. Currently `session.rs` opens a concrete `serialport::SerialPort`. files: `src/session.rs`, `src/serial_config.rs` — required to unblock the real pump assertion in `tests/integration/non_blocking_pump.rs` (currently ignored)
 
 ### Cross-cutting / hygiene
 
@@ -77,3 +79,22 @@ commit per task #9).
 - [x] (ide) theme.rs:63 — `Palette::log_number` field unread (dead_code) — REMOVED
 - [x] (ide) colorizer.rs:165 — replace `.map_or` with `.is_none_or` — FIXED
 - [x] (ide) colorizer.rs:175 — replace `while let` with `for` — FIXED
+
+## Build breakage at HEAD=4268d95 (2026-04-20, cli)
+
+`cargo test --test non_blocking_pump` failed because the main crate no longer
+compiles. These are pre-existing errors in IDE-lane code, not caused by the CLI
+harness commit. Filed here so IDE can address them quickly:
+
+- [ ] (ide) kiro_invoker.rs:66 — E0382 borrow of moved value `child`. `tokio::process::Child::kill` takes `&mut self` and can't be called after something consumed `child`. Likely need to call `.kill().await` before the `.wait()` branch or restructure the select.
+- [ ] (ide) session.rs:371 — E0382 borrow of partially moved value `ai`. A field of `ai` was moved earlier; access to `ai` here needs a re-borrow or the move needs to be cloned/referenced.
+- [ ] (ide) session.rs:313 — E0382 borrow of moved value `response_log`. Same pattern — probably passed by value into a spawn instead of by `Arc` or reference.
+- [ ] (ide) response_log.rs:67 — E0433 unresolved module `dirs`. The `dirs` crate is used but not in Cargo.toml. Add `dirs = "5"` (or use `std::env::var("USERPROFILE")` / `HOME` directly to avoid the dep).
+- [ ] (ide) response_log.rs:6 — warning: unused import `File`. Remove.
+- [ ] (ide) colorizer.rs:171 — warning: unused `mut`. Remove.
+
+CLI is blocked on this for tasks #11 execution (harness is committed, can't run
+until green). Tasks #10 and #12 are separately blocked on the `[lib]` exposure
+task.
+
+Reproduce: `cargo check --all-features` at HEAD=4268d95.
