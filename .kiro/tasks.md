@@ -30,7 +30,7 @@ so the other side sees them on the next pull.
 ### Spec: kiro-cli-log-analysis
 
 - [x] (ide) Design doc for kiro-cli-log-analysis — write `.kiro/specs/kiro-cli-log-analysis/design.md` covering architecture, module layout, task graph, split-pane UI approach, non-blocking guarantees, redaction pipeline. files: `.kiro/specs/kiro-cli-log-analysis/design.md` — DONE: two-lane architecture (log pump + AI subsystem), split-pane via ANSI scroll regions, HotkeyDispatcher extending ExitStateMachine, Redactor with 6 regex patterns, KiroInvoker with tokio::process + timeout, RollingBuffer with Arc<Mutex<VecDeque>>, ErrorScanner with 30s debounce, ResponseLog as append-only Markdown, full sequence diagrams for manual + auto-watch flows.
-- [~] (ide) Tasks doc for kiro-cli-log-analysis — write `tasks.md` after design is approved by user. files: `.kiro/specs/kiro-cli-log-analysis/tasks.md`
+- [x] (ide) Tasks doc for kiro-cli-log-analysis — write `tasks.md` after design is approved by user. files: `.kiro/specs/kiro-cli-log-analysis/tasks.md` — DONE: 21 tasks covering all new modules (ai/, ui/), existing file modifications, checkpoints, and docs. Ordered for incremental progress.
 - [ ] (ide) Implement `src/ai/` module (redaction, kiro-cli invoker, rolling buffer, response formatter) — after tasks.md approved. files: `src/ai/*.rs`, `Cargo.toml`
 - [ ] (ide) Implement split-pane terminal renderer — scroll region + AI pane drawing via crossterm. files: `src/ui/split_pane.rs`, `src/session.rs`
 - [ ] (ide) Wire hotkeys Ctrl+A A, Ctrl+A Q, Ctrl+A L into keymap + session. files: `src/io/keymap.rs`, `src/session.rs`
