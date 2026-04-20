@@ -64,7 +64,11 @@ impl ResponseLog {
 }
 
 fn dirs_next_or_home() -> PathBuf {
-    dirs::home_dir().unwrap_or_else(|| PathBuf::from("."))
+    // Use home_dir from std or fall back
+    std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("."))
 }
 
 fn chrono_local_now() -> String {

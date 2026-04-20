@@ -50,6 +50,7 @@ impl KiroInvoker {
             .spawn()
             .map_err(|e| AiError::SpawnFailed(e.to_string()))?;
 
+        let child_id = child.id();
         match timeout(self.timeout_duration, child.wait_with_output()).await {
             Ok(Ok(output)) => {
                 if output.status.success() {
@@ -62,9 +63,17 @@ impl KiroInvoker {
             }
             Ok(Err(e)) => Err(AiError::SpawnFailed(e.to_string())),
             Err(_) => {
-                // Timeout — kill the child and reap it
-                let _ = child.kill().await;
-                let _ = child.wait().await; // reap to avoid zombie
+                // Timeout — kill the child by PID (child already moved into wait_with_output)
+                #[cfg(windows)]
+                if let Some(pid) = child_id {
+                    let _ = std::process::Command::new("taskkill")
+                        .args(["/F", "/PID", &pid.to_string()])
+                        .output();
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = child_id; // suppress unused warning
+                }
                 Err(AiError::Timeout(self.timeout_duration))
             }
         }

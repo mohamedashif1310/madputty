@@ -161,7 +161,7 @@ pub async fn run(
     let rb_writer = rolling_buffer.clone();
 
     // AI analysis channel (hotkey triggers → AI task)
-    let (tx_ai_trigger, mut rx_ai_trigger) = mpsc::channel::<AiTrigger>(4);
+    let (tx_ai_trigger, rx_ai_trigger) = mpsc::channel::<AiTrigger>(4);
 
     // Response log
     let session_id = format!(
@@ -169,7 +169,7 @@ pub async fn run(
         chrono_session_id(),
         port_name.replace(['\\', '/', ':'], "-")
     );
-    let mut response_log = crate::ai::response_log::ResponseLog::new(&session_id);
+    let response_log = crate::ai::response_log::ResponseLog::new(&session_id);
 
     // Spawn Port_Reader
     let shutdown_reader = shutdown.clone();
@@ -227,12 +227,15 @@ pub async fn run(
         .await;
     });
 
-    // Spawn AI analysis consumer task
+    // Spawn AI analysis consumer task — returns the response_log so we can check has_entries
     let ai_shutdown = shutdown.clone();
     let ai_rb = rolling_buffer.clone();
     let ai_no_redact = opts.no_redact;
-    let ai_handle = tokio::spawn(async move {
-        ai_consumer_loop(ai, ai_rb, &mut rx_ai_trigger, &mut response_log, ai_no_redact, ai_shutdown).await;
+    let ai_handle: tokio::task::JoinHandle<crate::ai::response_log::ResponseLog> = tokio::spawn(async move {
+        let mut rx = rx_ai_trigger;
+        let mut rlog = response_log;
+        ai_consumer_loop(ai, ai_rb, &mut rx, &mut rlog, ai_no_redact, ai_shutdown).await;
+        rlog
     });
 
     // Spawn auto-watch error scanner (if enabled)
@@ -278,7 +281,7 @@ pub async fn run(
     let _ = forwarder_handle.await;
     let _ = writer_handle.await;
     let _ = status_handle.await;
-    let _ = ai_handle.await;
+    let ai_rlog = ai_handle.await.ok();
     if let Some(h) = autowatch_handle {
         let _ = h.await;
     }
@@ -310,11 +313,10 @@ pub async fn run(
     }
 
     // AI response log notification
-    if response_log.has_entries() {
-        println!(
-            "AI responses saved to {}",
-            response_log.path().display()
-        );
+    if let Some(rlog) = &ai_rlog {
+        if rlog.has_entries() {
+            println!("AI responses saved to {}", rlog.path().display());
+        }
     }
 
     result
@@ -342,6 +344,7 @@ async fn ai_consumer_loop(
         Some(inv) => inv,
         None => return, // AI disabled
     };
+    let redactor = ai.redactor;
 
     while !shutdown.load(Ordering::Relaxed) {
         let trigger = tokio::select! {
@@ -358,20 +361,26 @@ async fn ai_consumer_loop(
         let redacted = if no_redact {
             context
         } else {
-            ai.redactor.redact(&context)
+            redactor.redact(&context)
         };
 
         // Build prompt
+        let system_prompt = "You are a serial log analyst helping a firmware engineer. \
+            Analyze these live serial logs and explain what is happening in plain English. \
+            Call out errors, state transitions, and likely root causes. Be concise — 3 to 5 sentences. \
+            If you see WiFi connection attempts, identify the security mode, SSID if present, \
+            and whether the attempt succeeded or failed.";
+
         let (prompt, trigger_name, question) = match &trigger {
             AiTrigger::Analyze | AiTrigger::AutoWatch => {
                 let name = match trigger {
                     AiTrigger::AutoWatch => "Auto-watch",
                     _ => "Ctrl+A A",
                 };
-                (ai.build_analysis_prompt(&redacted), name, None)
+                (format!("{system_prompt}\n\nLogs:\n{redacted}"), name, None)
             }
             AiTrigger::Question(q) => (
-                ai.build_question_prompt(q, &redacted),
+                format!("{q}\n\nLogs:\n{redacted}"),
                 "Ctrl+A Q",
                 Some(q.as_str()),
             ),
