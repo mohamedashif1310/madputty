@@ -31,11 +31,11 @@ so the other side sees them on the next pull.
 
 - [x] (ide) Design doc for kiro-cli-log-analysis — write `.kiro/specs/kiro-cli-log-analysis/design.md` covering architecture, module layout, task graph, split-pane UI approach, non-blocking guarantees, redaction pipeline. files: `.kiro/specs/kiro-cli-log-analysis/design.md` — DONE: two-lane architecture (log pump + AI subsystem), split-pane via ANSI scroll regions, HotkeyDispatcher extending ExitStateMachine, Redactor with 6 regex patterns, KiroInvoker with tokio::process + timeout, RollingBuffer with Arc<Mutex<VecDeque>>, ErrorScanner with 30s debounce, ResponseLog as append-only Markdown, full sequence diagrams for manual + auto-watch flows.
 - [x] (ide) Tasks doc for kiro-cli-log-analysis — write `tasks.md` after design is approved by user. files: `.kiro/specs/kiro-cli-log-analysis/tasks.md` — DONE: 21 tasks covering all new modules (ai/, ui/), existing file modifications, checkpoints, and docs. Ordered for incremental progress.
-- [ ] (ide) Implement `src/ai/` module (redaction, kiro-cli invoker, rolling buffer, response formatter) — after tasks.md approved. files: `src/ai/*.rs`, `Cargo.toml`
-- [ ] (ide) Implement split-pane terminal renderer — scroll region + AI pane drawing via crossterm. files: `src/ui/split_pane.rs`, `src/session.rs`
+- [x] (ide) Implement `src/ai/` module (redaction, kiro-cli invoker, rolling buffer, response formatter) — after tasks.md approved. files: `src/ai/*.rs`, `Cargo.toml` — DONE: 7 files in src/ai/ (rolling_buffer, redactor, kiro_invoker, error_scanner, pane, response_log, mod). Zero diagnostics.
+- [x] (ide) Implement split-pane terminal renderer — scroll region + AI pane drawing via crossterm. files: `src/ui/split_pane.rs`, `src/session.rs` — DONE: src/ui/split_pane.rs + src/ui/mod.rs. ANSI scroll regions, resize handling, fallback mode. session.rs integration pending (separate task).
 - [ ] (ide) Wire hotkeys Ctrl+A A, Ctrl+A Q, Ctrl+A L into keymap + session. files: `src/io/keymap.rs`, `src/session.rs`
 - [ ] (ide) Add `--ai-watch`, `--ai-timeout-seconds`, `--no-redact`, `--no-ai` flags + `kiro-login`/`kiro-status` subcommands. files: `src/cli.rs`, `src/main.rs`
-- [ ] (ide) AI response persistence — write `~/.madputty/ai-responses/<session_id>.md`. files: `src/ai/response_log.rs`
+- [x] (ide) AI response persistence — write `~/.madputty/ai-responses/<session_id>.md`. files: `src/ai/response_log.rs` — DONE: append-only Markdown with timestamp headers.
 - [x] (cli) Add `regex = "1"` to Cargo.toml and run `cargo check --all-features` to confirm clean build after ai module lands. files: `Cargo.toml`, `Cargo.lock` — regex = "1" added to [dependencies]. `cargo check --all-features` exit 0. Same 3 pre-existing warnings.
 - [x] (cli) Run `cargo clippy -- -D warnings` across the repo after each ai module commit; file findings back. files: n/a (read-only analysis) — 5 findings filed below under "Clippy findings (2026-04-20)". 3 warnings pre-existing in theme.rs, 2 new in colorizer.rs. All are (ide) territory to fix.
 - [ ] (cli) Property-test the redaction engine with proptest — idempotence, leak prevention. files: `tests/redaction_properties.rs`
@@ -72,8 +72,8 @@ all (ide) territory to fix. These do NOT block any CLI task, but should be
 addressed before the next clippy sweep (which will run after each src/ai/ module
 commit per task #9).
 
-- [ ] (ide) theme.rs:155 — `let mut row =` closure, `mut` not needed (unused_mut)
-- [ ] (ide) theme.rs:35 — `pub const BOX_MASCOT` unused (dead_code); decide: remove or use
-- [ ] (ide) theme.rs:63 — `Palette::log_number` field unread (dead_code); decide: remove or use
-- [ ] (ide) colorizer.rs:165 — replace `.map_or(true, |c| c.is_whitespace())` with `.is_none_or(|c| c.is_whitespace())` (clippy::unnecessary_map_or)
-- [ ] (ide) colorizer.rs:175 — `while let Some(ch) = chars.next()` should be `for ch in chars` (clippy::while_let_on_iterator)
+- [x] (ide) theme.rs:155 — `let mut row =` closure, `mut` not needed (unused_mut) — FIXED
+- [x] (ide) theme.rs:35 — `pub const BOX_MASCOT` unused (dead_code) — REMOVED
+- [x] (ide) theme.rs:63 — `Palette::log_number` field unread (dead_code) — REMOVED
+- [x] (ide) colorizer.rs:165 — replace `.map_or` with `.is_none_or` — FIXED
+- [x] (ide) colorizer.rs:175 — replace `while let` with `for` — FIXED

@@ -31,14 +31,6 @@ pub const SMILE_LINES: &[&str] = &[
 
 pub const TAGLINE: &str = "serial terminal · amazon edition";
 
-/// Tiny Amazon box mascot (stylized) printed next to the wordmark.
-pub const BOX_MASCOT: &[&str] = &[
-    "  ┌─────────┐  ",
-    "  │  a͞mazon │  ",
-    "  │   ╲___╱  │  ",
-    "  └─────────┘  ",
-];
-
 /// Color styles. Amazon palette: yellow accents on white text, dim gray for
 /// metadata, red for errors.
 pub struct Palette {
@@ -60,7 +52,6 @@ pub struct Palette {
     pub log_level_warn: Style,
     pub log_level_error: Style,
     pub log_module: Style,
-    pub log_number: Style,
     pub log_prompt: Style,
     pub log_keyword_error: Style,
     pub log_keyword_warn: Style,
@@ -88,7 +79,6 @@ impl Palette {
             log_level_warn: Style::new().yellow().bright().bold(),
             log_level_error: Style::new().red().bright().bold(),
             log_module: Style::new().yellow().bright(),
-            log_number: Style::new().white().bright().bold(),
             log_prompt: Style::new().yellow().bright().bold(),
             log_keyword_error: Style::new().red().bright().bold(),
             log_keyword_warn: Style::new().yellow().bright().bold(),
@@ -116,7 +106,6 @@ impl Palette {
             log_level_warn: s.clone(),
             log_level_error: s.clone(),
             log_module: s.clone(),
-            log_number: s.clone(),
             log_prompt: s.clone(),
             log_keyword_error: s.clone(),
             log_keyword_warn: s.clone(),
@@ -152,7 +141,7 @@ pub fn print_banner(port: &str, baud: u32, framing: &str, palette: &Palette) {
     let edge_l = palette.border.apply_to("  │");
     let edge_r = palette.border.apply_to("│");
 
-    let mut row = |label: &str, value: &str| {
+    let row = |label: &str, value: &str| {
         let body = format!(
             " {} {} ",
             palette.label.apply_to(format!("{:<9}", label)),

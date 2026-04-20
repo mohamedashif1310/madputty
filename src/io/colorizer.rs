@@ -162,7 +162,7 @@ fn is_hex_id(s: &str) -> bool {
 /// True if the next char after position 0 is whitespace or end-of-string
 /// (so we don't recolor `Info` or `Error` as a level letter).
 fn is_level_boundary(s: &str) -> bool {
-    s.chars().nth(1).map_or(true, |c| c.is_whitespace())
+    s.chars().nth(1).is_none_or(|c| c.is_whitespace())
 }
 
 /// Color all `[...]` bracketed segments as module tags.
@@ -172,7 +172,7 @@ fn highlight_brackets(s: &str, p: &Palette) -> String {
     let mut in_bracket = false;
     let mut buf = String::new();
 
-    while let Some(ch) = chars.next() {
+    for ch in chars {
         if ch == '[' && !in_bracket {
             in_bracket = true;
             buf.push(ch);
