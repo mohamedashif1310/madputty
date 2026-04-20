@@ -98,3 +98,45 @@ until green). Tasks #10 and #12 are separately blocked on the `[lib]` exposure
 task.
 
 Reproduce: `cargo check --all-features` at HEAD=4268d95.
+
+
+## Defect scan findings (2026-04-20, cli, HEAD=531511a)
+
+Full project scan: `cargo clippy --all-targets --all-features` + src/ review + tests/docs drift check. Build green. Items grouped by owner.
+
+### P0 — correctness / leak / crash risks (ide)
+
+- [ ] (ide) `src/ai/kiro_invoker.rs:46-70` — timeout-kill is windows-only and uses taskkill PID fallback because `child` was moved into `wait_with_output()`. On non-Windows the child is never killed on timeout → zombie process. Fix: split into `stdout = child.stdout.take()` + `child.wait()` in a select, or keep `Child` and call `child.kill().await` before dropping.
+- [ ] (ide) `src/session.rs:~560` — AI error paths `eprintln!("⚠ {e}")` print the raw `AiError`. `AiError::KiroError(msg)` contains the first stderr line from kiro-cli which may echo back the unredacted prompt or partial auth errors. Redact or strip before display.
+- [ ] (ide) `src/ai/redactor.rs` — IP regex `\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}` matches version strings like "1.2.3.4" and timestamps. Tighten to word-boundary anchored or accept the false positive and document it. Also missing: bearer tokens, JWT-shaped tokens, base64 secrets >20 chars, MQTT/AWS access key patterns (`AKIA[0-9A-Z]{16}`).
+- [ ] (ide) `src/session.rs` auto-watch — `aw_tx.blocking_send(...)` is called from a `spawn_blocking` thread; if the AI consumer is slow and the channel is bounded (capacity 4), this blocks the scanner thread and it stops checking new lines. Switch to `try_send` with drop-on-full + tracing warning.
+- [ ] (ide) `src/ai/error_scanner.rs:21` — pattern `" E "` false-positives on any log containing " E " (space-E-space), e.g. "CODE EXECUTED". Anchor to log-level position or require `[E]` / `ERROR:`.
+- [ ] (ide) `src/ai/response_log.rs:chrono_local_now` — returns raw unix seconds as the timestamp header (`## 1745178912 — Ctrl+A A`). Unreadable. Either pull `chrono` (already justified by session_id) or format with a minimal yyyy-mm-dd HH:MM:SS via `SystemTime` + manual split.
+
+### P1 — docs drift / UX lies (ide)
+
+- [ ] (ide) README claims Ctrl+A Q works; code in `src/session.rs` HotkeyAction::AskQuestion just re-triggers Analyze. Either wire the question prompt or remove/footnote the README claim.
+- [ ] (ide) README claims Ctrl+A L shows full response; code prints "not yet implemented". Same fix: wire modal or remove claim.
+- [ ] (ide) `src/main.rs` — `--no-redact` warning is guarded by `ai_enabled`; if kiro-cli isn't installed, user doesn't see the warning even though they set the flag (harmless but misleading).
+
+### P2 — clippy 14 warnings (cli offered, flipping to cli)
+
+- [ ] (cli) Fix 14 clippy warnings: unused import `File` (response_log.rs:6), unused `mut` (kiro_invoker.rs:46, colorizer.rs:172), missing `is_empty` on RollingBuffer (add it), unused `SYSTEM_PROMPT` + `kiro_path` field + `build_*_prompt` methods in ai/mod.rs (likely dead now that session inlines the prompt — remove or `#[allow(dead_code)]` with note), `AiPaneState` never constructed (split-pane not wired — `#[allow]` or remove), `ForwardOutcome`/`ExitStateMachine` type aliases unused (remove), `MIN_AI_PANE_HEIGHT`/`MIN_TERMINAL_HEIGHT`/`SplitPaneRenderer` unused (same split-pane deferral — gate or remove), too_many_arguments on `status_line_loop` (refactor into struct or `#[allow]`).
+
+### P2 — dependency hygiene (cli)
+
+- [ ] (cli) `tokio = { version = "1", features = ["full"] }` pulls every tokio feature. With `opt-level="z"`, LTO, and `strip=true` in release, feature-trim to just `["rt-multi-thread","macros","process","sync","time","io-util"]` to cut binary size.
+- [ ] (cli) Add a `cargo audit` CI step (deferred task #20 already mentions a workflow; extend with audit + deny).
+- [ ] (cli) No `rust-toolchain.toml` — builds are toolchain-drift-prone. Add one pinning stable.
+
+### P2 — test coverage gaps (cli)
+
+- [ ] (cli) No unit tests for: `Redactor`, `HotkeyDispatcher`, `RollingBuffer`, `ErrorScanner`, `Colorizer`. Spec lists them as needed. #10 proptest covers Redactor; the rest should get minimal unit tests.
+- [ ] (cli) `src/io/colorizer.rs` has no tests despite being the most heuristic/brittle module in the repo.
+
+### P3 — dead code to delete or wire (ide)
+
+- [ ] (ide) `src/ai/pane.rs` `AiPaneState` — never constructed. Either wire via the split-pane task or delete.
+- [ ] (ide) `src/ui/split_pane.rs` `SplitPaneRenderer` — never constructed; session.rs uses plain `eprintln!` for AI output. Either integrate or mark the whole split-pane effort as deferred and gate the file behind a cfg/feature.
+- [ ] (ide) `src/ai/mod.rs` `build_analysis_prompt` / `build_question_prompt` — duplicated inline in `session.rs::ai_consumer_loop`. Pick one source of truth.
+- [ ] (ide) `src/io/keymap.rs` type aliases `ForwardOutcome`/`ExitStateMachine` — stale backward-compat aliases; nothing imports them.
