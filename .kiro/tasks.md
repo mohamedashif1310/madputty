@@ -37,7 +37,7 @@ so the other side sees them on the next pull.
 - [ ] (ide) Add `--ai-watch`, `--ai-timeout-seconds`, `--no-redact`, `--no-ai` flags + `kiro-login`/`kiro-status` subcommands. files: `src/cli.rs`, `src/main.rs`
 - [ ] (ide) AI response persistence — write `~/.madputty/ai-responses/<session_id>.md`. files: `src/ai/response_log.rs`
 - [x] (cli) Add `regex = "1"` to Cargo.toml and run `cargo check --all-features` to confirm clean build after ai module lands. files: `Cargo.toml`, `Cargo.lock` — regex = "1" added to [dependencies]. `cargo check --all-features` exit 0. Same 3 pre-existing warnings.
-- [ ] (cli) Run `cargo clippy -- -D warnings` across the repo after each ai module commit; file findings back. files: n/a (read-only analysis)
+- [x] (cli) Run `cargo clippy -- -D warnings` across the repo after each ai module commit; file findings back. files: n/a (read-only analysis) — 5 findings filed below under "Clippy findings (2026-04-20)". 3 warnings pre-existing in theme.rs, 2 new in colorizer.rs. All are (ide) territory to fix.
 - [ ] (cli) Property-test the redaction engine with proptest — idempotence, leak prevention. files: `tests/redaction_properties.rs`
 - [ ] (cli) Integration test for non-blocking log pump — spawn madputty in plain mode, assert bytes keep flowing while a mock slow AI task runs. files: `tests/integration/non_blocking_pump.rs`
 - [ ] (cli) Benchmark split-pane redraw cost at 921600 baud to confirm no visible lag. files: `benches/redraw.rs`
@@ -64,3 +64,16 @@ so the other side sees them on the next pull.
 - This repo just got `git init`'d. No remotes yet. If/when a remote is added, both sides should pull before picking tasks.
 - Both sides MUST commit status flips immediately to minimize races on claim.
 - If you see two `[~]` entries for the same task after a pull, the second claimer's earlier commit must be dropped (force-pull the first claim and back off).
+
+## Clippy findings (2026-04-20, cli)
+
+`cargo clippy --all-targets --all-features -- -D warnings` exit 101. 5 findings,
+all (ide) territory to fix. These do NOT block any CLI task, but should be
+addressed before the next clippy sweep (which will run after each src/ai/ module
+commit per task #9).
+
+- [ ] (ide) theme.rs:155 — `let mut row =` closure, `mut` not needed (unused_mut)
+- [ ] (ide) theme.rs:35 — `pub const BOX_MASCOT` unused (dead_code); decide: remove or use
+- [ ] (ide) theme.rs:63 — `Palette::log_number` field unread (dead_code); decide: remove or use
+- [ ] (ide) colorizer.rs:165 — replace `.map_or(true, |c| c.is_whitespace())` with `.is_none_or(|c| c.is_whitespace())` (clippy::unnecessary_map_or)
+- [ ] (ide) colorizer.rs:175 — `while let Some(ch) = chars.next()` should be `for ch in chars` (clippy::while_let_on_iterator)
