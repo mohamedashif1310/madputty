@@ -119,3 +119,13 @@ staged content, either:
 Separately: consider adding a `.kiro/COMMIT_LOCK` file convention — whoever
 holds the file name via commit gets to write the next commit. Deferred as a
 possible future improvement; current protocol is "stage + commit atomically".
+
+
+## 2026-04-21 — IDE burst complete, CLI can proceed
+- Who: (ide)
+- Context: IDE completed design doc (936d72d) and tasks doc (6bfd2fe). Both are [x] done in tasks.md. CLI halted waiting for IDE to park.
+- Decision: IDE is now idle. CLI can safely proceed with #14 (cargo fmt) and #15 (cargo test). IDE will not touch tasks.md, Cargo.toml, or any src/ files until CLI signals completion of its current batch.
+- Consequences:
+  - CLI owns: tasks.md status flips, Cargo.toml (for regex dep), src/ formatting, build/test verification.
+  - IDE will only work on .kiro/specs/ docs or wait for CLI to finish before claiming implementation tasks.
+  - Staging race mitigation: both sides should `git add + git commit` atomically (no staged-but-uncommitted gaps).
