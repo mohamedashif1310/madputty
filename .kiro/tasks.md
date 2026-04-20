@@ -29,7 +29,7 @@ so the other side sees them on the next pull.
 
 ### Spec: kiro-cli-log-analysis
 
-- [~] (ide) Design doc for kiro-cli-log-analysis — write `.kiro/specs/kiro-cli-log-analysis/design.md` covering architecture, module layout, task graph, split-pane UI approach, non-blocking guarantees, redaction pipeline. files: `.kiro/specs/kiro-cli-log-analysis/design.md`
+- [x] (ide) Design doc for kiro-cli-log-analysis — write `.kiro/specs/kiro-cli-log-analysis/design.md` covering architecture, module layout, task graph, split-pane UI approach, non-blocking guarantees, redaction pipeline. files: `.kiro/specs/kiro-cli-log-analysis/design.md` — DONE: two-lane architecture (log pump + AI subsystem), split-pane via ANSI scroll regions, HotkeyDispatcher extending ExitStateMachine, Redactor with 6 regex patterns, KiroInvoker with tokio::process + timeout, RollingBuffer with Arc<Mutex<VecDeque>>, ErrorScanner with 30s debounce, ResponseLog as append-only Markdown, full sequence diagrams for manual + auto-watch flows.
 - [ ] (ide) Tasks doc for kiro-cli-log-analysis — write `tasks.md` after design is approved by user. files: `.kiro/specs/kiro-cli-log-analysis/tasks.md`
 - [ ] (ide) Implement `src/ai/` module (redaction, kiro-cli invoker, rolling buffer, response formatter) — after tasks.md approved. files: `src/ai/*.rs`, `Cargo.toml`
 - [ ] (ide) Implement split-pane terminal renderer — scroll region + AI pane drawing via crossterm. files: `src/ui/split_pane.rs`, `src/session.rs`
@@ -45,9 +45,9 @@ so the other side sees them on the next pull.
 ### Cross-cutting / hygiene
 
 - [x] (cli) Configure `.gitignore` for Rust target dir, editor junk, local creds. files: `.gitignore` — expanded to cover Rust/Cargo, editors, OS junk, secrets (pem/key/env), logs, criterion, madputty runtime dirs (`/ai-responses/`, `/session-logs/`, `/.madputty/`), and `.kiro/cache` + `.kiro/sessions`. Cargo.lock policy intentionally deferred to IDE (see decisions.md).
-- [!] (cli) Run `cargo fmt --all` once and commit a baseline. files: whole repo (format-only) — blocked on baseline commit of project sources
-- [!] (cli) Verify `cargo test --workspace` passes from a clean checkout. files: none (verification) — blocked on baseline commit of project sources
-- [~] (cli) Commit baseline project sources (src/, Cargo.toml, Cargo.lock, README.md, PROJECT_OVERVIEW.md, LICENSE, CONTRIBUTING.md, .github/, .kiro/specs/) — prerequisite for fmt/test tasks. IDE should decide Cargo.lock policy (track for binary, ignore for lib). files: repo-wide
+- [ ] (cli) Run `cargo fmt --all` once and commit a baseline. files: whole repo (format-only)
+- [ ] (cli) Verify `cargo test --workspace` passes from a clean checkout. files: none (verification)
+- [x] (cli) Commit baseline project sources (src/, Cargo.toml, Cargo.lock, README.md, PROJECT_OVERVIEW.md, LICENSE, CONTRIBUTING.md, .github/, .kiro/specs/) — files landed in commit ac29e1a. NOTE: staging race with IDE caused my staged content to be included in IDE's claim commit; see race ADR in decisions.md. Content is correct; Cargo.lock tracked per binary convention. `cargo check` passes (3 pre-existing warnings in src/theme.rs).
 - [ ] (ide) Update `README.md` with new `--ai-*` flags, hotkey table, and kiro-cli setup section. files: `README.md`
 - [ ] (ide) Update `PROJECT_OVERVIEW.md` with kiro-cli integration section (extension points, ADR pointers). files: `PROJECT_OVERVIEW.md`
 - [ ] (ide) Add an ADR-style entry in `decisions.md` for "why split-pane over full TUI" once design lands. files: `.kiro/decisions.md`

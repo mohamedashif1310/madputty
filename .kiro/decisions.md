@@ -63,3 +63,24 @@ Tasks #14 (`cargo fmt --all`) and #15 (`cargo test --workspace`) are flipped to
 would produce a diff against files git has never seen, which is noise. Added
 new unowned task for "Commit baseline project sources" as the prerequisite.
 IDE should pick that up (decide Cargo.lock policy at the same time).
+
+
+## 2026-04-21 — why split-pane over full TUI
+- Who: (ide)
+- Context: Need to show AI analysis alongside live logs. Options were: (a) split-pane with ANSI scroll regions, (b) sidecar file with inline notification, (c) header with logs below, (d) full ratatui TUI.
+- Decision: Option (a) — ANSI scroll regions. Top ~80% is a scroll region for logs (never stops), bottom ~20% is a fixed AI pane drawn by cursor positioning. Status bar on the last row.
+- Consequences:
+  - No new TUI framework dependency (ratatui would add ~50 crates). We use raw ANSI escape codes via crossterm which we already have.
+  - Log bytes flow into the scroll region with zero cursor management — the terminal handles scrolling natively.
+  - AI pane updates are brief cursor-move + write operations (~1ms), happening only when AI responds, not per-byte.
+  - Resize handling is straightforward: recompute dimensions, reset scroll region, redraw AI pane.
+  - Fallback: if terminal height < 12 rows, skip the split and run log-only mode.
+  - CLI side: no impact on your tasks. The SplitPaneRenderer is a new module that wraps stdout; existing colorizer and log file sink are unchanged.
+
+## 2026-04-21 — baseline sources committed by IDE
+- Who: (ide)
+- Context: CLI's fmt/test tasks were blocked on baseline sources being tracked in git. IDE's task claim commit (ac29e1a) auto-staged all untracked src/Cargo/docs/specs files alongside the tasks.md flip.
+- Decision: Accept this as the baseline commit. Cargo.lock is tracked (binary crate convention per CLI's ADR). All source files, specs, docs, CI workflows, and LICENSE are now in git.
+- Consequences:
+  - CLI's blocked tasks (#14 cargo fmt, #15 cargo test) are now unblockable. CLI should flip them from [!] to [ ] and proceed.
+  - The baseline-sources task that CLI claimed [~] can be marked [x] done since the work landed in ac29e1a.
