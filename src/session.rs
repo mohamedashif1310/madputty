@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use crossterm::event::{self, Event};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
-use serialport::{ErrorKind as SerialErrorKind, SerialPort};
+use serialport::ErrorKind as SerialErrorKind;
 use tokio::sync::{mpsc, oneshot};
 
 use crate::ai::rolling_buffer::RollingBuffer;
@@ -22,6 +22,7 @@ use crate::io::colorizer::Colorizer;
 use crate::io::keymap::{event_to_bytes, HotkeyAction, HotkeyDispatcher};
 use crate::io::stdout_sink::StdoutSink;
 use crate::serial_config::SerialConfig;
+use crate::serial_port_trait::{DuplexStream, SerialPortStream};
 use crate::theme::{
     boot_sequence, humanize_bytes, print_banner, print_session_summary, typewriter, Palette,
 };
@@ -110,10 +111,7 @@ pub async fn run(
     };
 
     // Open port
-    let mut port = config
-        .builder(port_name)
-        .open()
-        .map_err(|e| map_open_error(e, port_name))?;
+    // (moved to "Startup send" section below for write-before-clone pattern)
 
     // Banner
     let framing = config.framing();
@@ -137,15 +135,22 @@ pub async fn run(
 
     // Startup send
     let mut initial_tx: u64 = 0;
+    let mut stream = SerialPortStream::new(
+        config
+            .builder(port_name)
+            .open()
+            .map_err(|e| map_open_error(e, port_name))?,
+    );
     if let Some(bytes) = send_bytes {
-        port.write_all(&bytes)?;
-        port.flush()?;
+        use std::io::Write as _;
+        stream.write_all(&bytes)?;
+        stream.flush()?;
         initial_tx = bytes.len() as u64;
     }
 
-    // Clone port
-    let port_read = port.try_clone()?;
-    let port_write = port;
+    // Clone port into read/write halves
+    let port_read = stream.try_clone_stream()?;
+    let port_write: Box<dyn DuplexStream> = Box::new(stream);
 
     // Channels + counters
     let (tx_bytes, rx_bytes) = mpsc::unbounded_channel::<Vec<u8>>();
@@ -414,7 +419,7 @@ async fn ai_consumer_loop(
 }
 
 fn port_reader_loop(
-    mut port: Box<dyn SerialPort>,
+    mut port: Box<dyn DuplexStream>,
     mut sink: StdoutSink,
     shutdown: Arc<AtomicBool>,
     err_tx: oneshot::Sender<MadPuttyError>,
@@ -477,7 +482,7 @@ fn port_reader_loop(
 }
 
 async fn port_writer_loop(
-    mut port: Box<dyn SerialPort>,
+    mut port: Box<dyn DuplexStream>,
     mut rx: mpsc::UnboundedReceiver<Vec<u8>>,
     bytes_tx: Arc<AtomicU64>,
 ) {

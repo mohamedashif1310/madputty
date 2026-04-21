@@ -205,3 +205,76 @@ impl SplitPaneRenderer {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn standard_terminal_80x24_dimensions() {
+        let r = SplitPaneRenderer::new(80, 24);
+        assert!(r.active);
+        // ai_pane_height = max(6, 24 * 20 / 100) = max(6, 4) = 6
+        assert_eq!(r.ai_pane_height, 6);
+        // log_region_height = 24 - 6 - 1 = 17
+        assert_eq!(r.log_region_height, 17);
+        // status_bar_row = height = 24
+        assert_eq!(r.status_bar_row, 24);
+        // ai_pane_top_row = log_region_height + 1 = 18
+        assert_eq!(r.ai_pane_top_row, 18);
+    }
+
+    #[test]
+    fn large_terminal_120x50_dimensions() {
+        let r = SplitPaneRenderer::new(120, 50);
+        assert!(r.active);
+        // ai_pane_height = max(6, 50 * 20 / 100) = max(6, 10) = 10
+        assert_eq!(r.ai_pane_height, 10);
+        // log_region_height = 50 - 10 - 1 = 39
+        assert_eq!(r.log_region_height, 39);
+        assert_eq!(r.status_bar_row, 50);
+        assert_eq!(r.ai_pane_top_row, 40);
+        assert_eq!(r.term_width, 120);
+    }
+
+    #[test]
+    fn small_terminal_80x12_minimum_ai_pane_height() {
+        let r = SplitPaneRenderer::new(80, 12);
+        assert!(r.active);
+        // ai_pane_height = max(6, 12 * 20 / 100) = max(6, 2) = 6
+        assert_eq!(r.ai_pane_height, 6);
+        // log_region_height = 12 - 6 - 1 = 5
+        assert_eq!(r.log_region_height, 5);
+        assert_eq!(r.status_bar_row, 12);
+    }
+
+    #[test]
+    fn very_small_terminal_80x10_fallback_mode() {
+        let r = SplitPaneRenderer::new(80, 10);
+        // height < 12 triggers fallback mode
+        assert!(!r.active);
+        assert_eq!(r.ai_pane_height, 0);
+        assert_eq!(r.log_region_height, 9); // height.saturating_sub(1)
+        assert_eq!(r.status_bar_row, 10);
+    }
+
+    #[test]
+    fn ai_pane_height_formula() {
+        // Verify ai_pane_height = max(6, height * 20 / 100) for various heights
+        for height in 12..=100u16 {
+            let r = SplitPaneRenderer::new(80, height);
+            let expected = (height * 20 / 100).max(MIN_AI_PANE_HEIGHT);
+            assert_eq!(r.ai_pane_height, expected, "failed for height={height}");
+        }
+    }
+
+    #[test]
+    fn log_region_height_formula() {
+        // Verify log_region_height = height - ai_pane_height - 1 for various heights
+        for height in 12..=100u16 {
+            let r = SplitPaneRenderer::new(80, height);
+            let expected = height - r.ai_pane_height - 1;
+            assert_eq!(r.log_region_height, expected, "failed for height={height}");
+        }
+    }
+}

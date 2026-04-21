@@ -9,5 +9,6 @@ pub mod cli;
 pub mod errors;
 pub mod io;
 pub mod serial_config;
+pub mod serial_port_trait;
 pub mod theme;
 pub mod ui;

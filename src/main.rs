@@ -4,6 +4,7 @@ mod errors;
 mod io;
 mod list;
 mod serial_config;
+mod serial_port_trait;
 mod session;
 mod theme;
 mod ui;
