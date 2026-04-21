@@ -78,8 +78,10 @@ impl HotkeyDispatcher {
     }
 }
 
-// Keep backward compat aliases
+// Backward compat aliases (retained for external consumers)
+#[allow(dead_code)]
 pub type ForwardOutcome = HotkeyAction;
+#[allow(dead_code)]
 pub type ExitStateMachine = HotkeyDispatcher;
 
 /// Translate a crossterm `Event` into the bytes a serial device expects.
@@ -113,5 +115,83 @@ pub fn key_event_to_bytes(key: &KeyEvent) -> Vec<u8> {
             }
         }
         _ => Vec::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plain_bytes_pass_through() {
+        let mut d = HotkeyDispatcher::new(true);
+        assert_eq!(d.feed(b"hello"), HotkeyAction::Forward(b"hello".to_vec()));
+    }
+
+    #[test]
+    fn ctrl_a_alone_arms_no_output() {
+        let mut d = HotkeyDispatcher::new(true);
+        assert_eq!(d.feed(&[CTRL_A]), HotkeyAction::Continue);
+        // Subsequent non-hotkey byte flushes both bytes.
+        assert_eq!(d.feed(b"z"), HotkeyAction::Forward(vec![CTRL_A, b'z']));
+    }
+
+    #[test]
+    fn ctrl_a_ctrl_x_exits() {
+        let mut d = HotkeyDispatcher::new(true);
+        assert_eq!(d.feed(&[CTRL_A, CTRL_X]), HotkeyAction::Exit);
+    }
+
+    #[test]
+    fn ctrl_a_a_analyzes_when_ai_enabled() {
+        let mut d = HotkeyDispatcher::new(true);
+        assert_eq!(d.feed(&[CTRL_A, b'a']), HotkeyAction::Analyze);
+        let mut d = HotkeyDispatcher::new(true);
+        assert_eq!(d.feed(&[CTRL_A, b'A']), HotkeyAction::Analyze);
+    }
+
+    #[test]
+    fn ctrl_a_q_asks_question_when_ai_enabled() {
+        let mut d = HotkeyDispatcher::new(true);
+        assert_eq!(d.feed(&[CTRL_A, b'q']), HotkeyAction::AskQuestion);
+    }
+
+    #[test]
+    fn ctrl_a_l_shows_last_response_when_ai_enabled() {
+        let mut d = HotkeyDispatcher::new(true);
+        assert_eq!(d.feed(&[CTRL_A, b'l']), HotkeyAction::ShowLastResponse);
+    }
+
+    #[test]
+    fn ai_hotkeys_fall_through_when_disabled() {
+        let mut d = HotkeyDispatcher::new(false);
+        assert_eq!(
+            d.feed(&[CTRL_A, b'a']),
+            HotkeyAction::Forward(vec![CTRL_A, b'a'])
+        );
+    }
+
+    #[test]
+    fn ctrl_a_x_still_exits_when_ai_disabled() {
+        let mut d = HotkeyDispatcher::new(false);
+        assert_eq!(d.feed(&[CTRL_A, CTRL_X]), HotkeyAction::Exit);
+    }
+
+    #[test]
+    fn armed_state_resets_after_non_hotkey() {
+        let mut d = HotkeyDispatcher::new(true);
+        // Arm with Ctrl+A, flush with 'z' — 'z' is NOT a hotkey so it emits [CTRL_A,'z'].
+        assert_eq!(
+            d.feed(&[CTRL_A, b'z']),
+            HotkeyAction::Forward(vec![CTRL_A, b'z'])
+        );
+        // Now disarmed — a plain 'z' should just forward as-is.
+        assert_eq!(d.feed(b"z"), HotkeyAction::Forward(b"z".to_vec()));
+    }
+
+    #[test]
+    fn empty_input_is_continue() {
+        let mut d = HotkeyDispatcher::new(true);
+        assert_eq!(d.feed(&[]), HotkeyAction::Continue);
     }
 }

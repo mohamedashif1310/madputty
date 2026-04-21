@@ -24,6 +24,7 @@ use redactor::Redactor;
 use response_log::ResponseLog;
 use rolling_buffer::RollingBuffer;
 
+#[allow(dead_code)]
 const SYSTEM_PROMPT: &str = "You are a serial log analyst helping a firmware engineer. \
     Analyze these live serial logs and explain what is happening in plain English. \
     Call out errors, state transitions, and likely root causes. Be concise — 3 to 5 sentences. \
@@ -31,6 +32,7 @@ const SYSTEM_PROMPT: &str = "You are a serial log analyst helping a firmware eng
     and whether the attempt succeeded or failed.";
 
 /// Result of a completed AI task pipeline.
+#[allow(dead_code)]
 pub enum AiTaskResult {
     /// Successful response from kiro-cli.
     Success(String),
@@ -41,12 +43,14 @@ pub enum AiTaskResult {
 }
 
 pub struct AiSubsystem {
+    #[allow(dead_code)]
     pub kiro_path: Option<PathBuf>,
     pub logged_in: bool,
     pub enabled: bool,
     pub invoker: Option<KiroInvoker>,
     pub redactor: Redactor,
     /// Handle to the currently running AI task (latest wins — previous is aborted).
+    #[allow(dead_code)]
     current_task: Option<JoinHandle<()>>,
 }
 
@@ -97,6 +101,7 @@ impl AiSubsystem {
     }
 
     /// Cancel any currently running AI task (latest wins).
+    #[allow(dead_code)]
     fn cancel_current_task(&mut self) {
         if let Some(handle) = self.current_task.take() {
             handle.abort();
@@ -110,6 +115,7 @@ impl AiSubsystem {
     /// If a previous AI task is running, it is cancelled (latest wins).
     /// Returns immediately after spawning the task. The pane and log are updated
     /// asynchronously when the task completes.
+    #[allow(dead_code)]
     pub fn analyze(
         &mut self,
         buffer: &RollingBuffer,
@@ -178,6 +184,7 @@ impl AiSubsystem {
     /// Pipeline: snapshot → redact → build question prompt → invoke kiro-cli → update pane → append log.
     ///
     /// If a previous AI task is running, it is cancelled (latest wins).
+    #[allow(dead_code)]
     pub fn ask_question(
         &mut self,
         question: &str,
@@ -244,11 +251,13 @@ impl AiSubsystem {
     }
 
     /// Build the full prompt for a default analysis request.
+    #[allow(dead_code)]
     pub fn build_analysis_prompt(&self, redacted_snapshot: &str) -> String {
         format!("{SYSTEM_PROMPT}\n\nLogs:\n{redacted_snapshot}")
     }
 
     /// Build the prompt for a custom question.
+    #[allow(dead_code)]
     pub fn build_question_prompt(&self, question: &str, redacted_snapshot: &str) -> String {
         format!("{question}\n\nLogs:\n{redacted_snapshot}")
     }

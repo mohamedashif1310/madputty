@@ -86,6 +86,7 @@ impl ResponseLog {
 }
 
 /// Generate a session ID in the format `YYYYMMDD-HHMMSS-<port>`.
+#[allow(dead_code)]
 pub fn make_session_id(port: &str) -> String {
     let now = format_local_compact(SystemTime::now());
     let sanitized = sanitize_port_name(port);
@@ -93,6 +94,7 @@ pub fn make_session_id(port: &str) -> String {
 }
 
 /// Sanitize port name for use in filenames (replace path separators, colons, etc.).
+#[allow(dead_code)]
 fn sanitize_port_name(port: &str) -> String {
     port.chars()
         .map(|c| match c {
@@ -136,6 +138,7 @@ fn format_local_timestamp(time: SystemTime) -> String {
 }
 
 /// Format a `SystemTime` as `YYYYMMDD-HHMMSS` for session IDs.
+#[allow(dead_code)]
 fn format_local_compact(time: SystemTime) -> String {
     let secs = time
         .duration_since(SystemTime::UNIX_EPOCH)
@@ -188,7 +191,7 @@ fn secs_to_datetime(secs: u64) -> (u64, u64, u64, u64, u64, u64) {
 }
 
 fn is_leap_year(year: u64) -> bool {
-    (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)
+    (year.is_multiple_of(4) && !year.is_multiple_of(100)) || year.is_multiple_of(400)
 }
 
 #[cfg(test)]
@@ -246,7 +249,11 @@ mod tests {
     fn test_response_log_new() {
         let log = ResponseLog::new("20260421-123456-COM3");
         assert!(!log.has_entries());
-        assert!(log.path().to_str().unwrap().contains("20260421-123456-COM3.md"));
+        assert!(log
+            .path()
+            .to_str()
+            .unwrap()
+            .contains("20260421-123456-COM3.md"));
         assert!(log.path().to_str().unwrap().contains("ai-responses"));
     }
 
@@ -260,8 +267,12 @@ mod tests {
             has_entries: false,
         };
 
-        log.append("Ctrl+A A", None, "The device is rebooting due to a watchdog timeout.")
-            .unwrap();
+        log.append(
+            "Ctrl+A A",
+            None,
+            "The device is rebooting due to a watchdog timeout.",
+        )
+        .unwrap();
 
         assert!(log.has_entries());
         let content = std::fs::read_to_string(&file_path).unwrap();

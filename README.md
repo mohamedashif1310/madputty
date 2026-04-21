@@ -76,9 +76,11 @@ madputty kiro-status
 | Hotkey | Action |
 | --- | --- |
 | **Ctrl+A A** | Analyze last 50 log lines with AI |
-| **Ctrl+A Q** | Ask a custom question about the logs |
+| **Ctrl+A Q** | Ask a custom question about the logs ¹ |
 | **Ctrl+A L** | Show full last AI response (scrollable) |
 | **Ctrl+A X** | Exit session |
+
+¹ Custom question input is not yet wired — currently re-triggers a standard analysis. Full inline prompt coming in a future release.
 
 ### AI Flags
 

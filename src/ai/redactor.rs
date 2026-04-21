@@ -30,7 +30,8 @@ impl Redactor {
                 replacement: "token=[REDACTED]".to_string(),
             },
             RedactionRule {
-                pattern: Regex::new(r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}").unwrap(),
+                // Word-boundary anchored to avoid matching version strings like "1.2.3.4"
+                pattern: Regex::new(r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b").unwrap(),
                 replacement: "[IP]".to_string(),
             },
             RedactionRule {
@@ -48,6 +49,16 @@ impl Redactor {
                 .unwrap(),
                 replacement: "${1}=[REDACTED]".to_string(),
             },
+            // Bearer tokens
+            RedactionRule {
+                pattern: Regex::new(r"(?i)Bearer\s+\S+").unwrap(),
+                replacement: "Bearer [REDACTED]".to_string(),
+            },
+            // AWS access key IDs (AKIA...)
+            RedactionRule {
+                pattern: Regex::new(r"AKIA[0-9A-Z]{16}").unwrap(),
+                replacement: "[AWS_KEY]".to_string(),
+            },
         ];
         Self { rules }
     }
@@ -56,7 +67,10 @@ impl Redactor {
     pub fn redact(&self, input: &str) -> String {
         let mut result = input.to_string();
         for rule in &self.rules {
-            result = rule.pattern.replace_all(&result, &rule.replacement).to_string();
+            result = rule
+                .pattern
+                .replace_all(&result, &rule.replacement)
+                .to_string();
         }
         result
     }
@@ -73,8 +87,8 @@ mod tests {
     use super::*;
     use proptest::prelude::*;
 
-    /// **Validates: Requirements 6.8**
-    /// Redactor is idempotent: applying redact twice yields the same result as once.
+    // Validates: Requirements 6.8
+    // Redactor is idempotent: applying redact twice yields the same result as once.
     proptest! {
         #[test]
         fn redact_is_idempotent(input in "\\PC{0,200}") {
@@ -85,8 +99,8 @@ mod tests {
         }
     }
 
-    /// **Validates: Requirements 6.8**
-    /// When input contains a password pattern, the output never leaks the original value.
+    // Validates: Requirements 6.8
+    // When input contains a password pattern, the output never leaks the original value.
     proptest! {
         #[test]
         fn redact_never_leaks_password(secret in "[a-zA-Z0-9_]{1,30}") {
@@ -99,8 +113,8 @@ mod tests {
         }
     }
 
-    /// **Validates: Requirements 6.8**
-    /// When input contains a token pattern, the output never leaks the original value.
+    // Validates: Requirements 6.8
+    // When input contains a token pattern, the output never leaks the original value.
     proptest! {
         #[test]
         fn redact_never_leaks_token(secret in "[a-zA-Z0-9_]{1,30}") {
@@ -113,8 +127,8 @@ mod tests {
         }
     }
 
-    /// **Validates: Requirements 6.8**
-    /// When input contains an IPv4 address, the output never leaks the original IP.
+    // Validates: Requirements 6.8
+    // When input contains an IPv4 address, the output never leaks the original IP.
     proptest! {
         #[test]
         fn redact_never_leaks_ipv4(
@@ -140,7 +154,10 @@ mod tests {
     fn redact_password_pattern() {
         let r = Redactor::new();
         assert_eq!(r.redact("password=hunter2"), "password=[REDACTED]");
-        assert_eq!(r.redact("login password=s3cr3t! done"), "login password=[REDACTED] done");
+        assert_eq!(
+            r.redact("login password=s3cr3t! done"),
+            "login password=[REDACTED] done"
+        );
     }
 
     /// **Validates: Requirements 6.3**
@@ -148,7 +165,10 @@ mod tests {
     fn redact_token_pattern() {
         let r = Redactor::new();
         assert_eq!(r.redact("token=abc123xyz"), "token=[REDACTED]");
-        assert_eq!(r.redact("auth token=DEADBEEF ok"), "auth token=[REDACTED] ok");
+        assert_eq!(
+            r.redact("auth token=DEADBEEF ok"),
+            "auth token=[REDACTED] ok"
+        );
     }
 
     /// **Validates: Requirements 6.4**
@@ -164,7 +184,10 @@ mod tests {
     fn redact_mac_pattern() {
         let r = Redactor::new();
         assert_eq!(r.redact("mac=AA:BB:CC:DD:EE:FF"), "mac=[MAC]");
-        assert_eq!(r.redact("device 01:23:45:67:89:ab connected"), "device [MAC] connected");
+        assert_eq!(
+            r.redact("device 01:23:45:67:89:ab connected"),
+            "device [MAC] connected"
+        );
     }
 
     /// **Validates: Requirements 6.6**
@@ -172,7 +195,10 @@ mod tests {
     fn redact_ssid_pattern() {
         let r = Redactor::new();
         assert_eq!(r.redact("SSID=MyNetwork"), "SSID=[SSID]");
-        assert_eq!(r.redact("joining SSID=Home_WiFi_5G now"), "joining SSID=[SSID] now");
+        assert_eq!(
+            r.redact("joining SSID=Home_WiFi_5G now"),
+            "joining SSID=[SSID] now"
+        );
     }
 
     /// **Validates: Requirements 6.7**
@@ -181,7 +207,10 @@ mod tests {
         let r = Redactor::new();
         assert_eq!(r.redact("api_key=abcdef123"), "api_key=[REDACTED]");
         assert_eq!(r.redact("secret_key: s3cr3t"), "secret_key=[REDACTED]");
-        assert_eq!(r.redact("access_key = AKIAIOSFODNN7"), "access_key=[REDACTED]");
+        assert_eq!(
+            r.redact("access_key = AKIAIOSFODNN7"),
+            "access_key=[REDACTED]"
+        );
         // Case-insensitive
         assert_eq!(r.redact("API_KEY=xyz"), "API_KEY=[REDACTED]");
         assert_eq!(r.redact("Secret-Key: foo"), "Secret-Key=[REDACTED]");

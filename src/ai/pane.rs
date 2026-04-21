@@ -9,7 +9,9 @@ pub struct AiPaneState {
     pub body_truncated: bool,
     pub spinner_active: bool,
     pub error: Option<String>,
+    #[allow(dead_code)]
     pub modal_open: bool,
+    #[allow(dead_code)]
     pub modal_scroll_offset: usize,
 }
 
@@ -43,15 +45,18 @@ impl AiPaneState {
         self.spinner_active = active;
     }
 
+    #[allow(dead_code)]
     pub fn open_modal(&mut self) {
         self.modal_open = true;
         self.modal_scroll_offset = 0;
     }
 
+    #[allow(dead_code)]
     pub fn close_modal(&mut self) {
         self.modal_open = false;
     }
 
+    #[allow(dead_code)]
     pub fn scroll_modal(&mut self, delta: isize) {
         let new_offset = self.modal_scroll_offset as isize + delta;
         self.modal_scroll_offset = new_offset.max(0) as usize;

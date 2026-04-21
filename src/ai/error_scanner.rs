@@ -17,7 +17,7 @@ pub struct ErrorScanner {
 impl ErrorScanner {
     pub fn new() -> Self {
         let keywords = [
-            r" E ",       // Log level marker with spaces
+            r"(?:^|\s)E\s", // Log level marker anchored to start-of-line or after whitespace
             r"ERROR",
             r"FAIL",
             r"FAILED",
@@ -25,10 +25,7 @@ impl ErrorScanner {
             r"EXCEPTION",
             r"TIMEOUT",
         ];
-        let patterns = keywords
-            .iter()
-            .map(|k| Regex::new(k).unwrap())
-            .collect();
+        let patterns = keywords.iter().map(|k| Regex::new(k).unwrap()).collect();
 
         Self {
             patterns,

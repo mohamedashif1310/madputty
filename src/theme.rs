@@ -56,6 +56,18 @@ pub struct Palette {
     pub log_keyword_error: Style,
     pub log_keyword_warn: Style,
     pub log_keyword_ok: Style,
+
+    // AI pane styles (used by SplitPaneRenderer when wired)
+    #[allow(dead_code)]
+    pub ai_header: Style,
+    #[allow(dead_code)]
+    pub ai_separator: Style,
+    #[allow(dead_code)]
+    pub ai_spinner: Style,
+    #[allow(dead_code)]
+    pub ai_error: Style,
+    #[allow(dead_code)]
+    pub ai_body: Style,
 }
 
 impl Palette {
@@ -83,6 +95,12 @@ impl Palette {
             log_keyword_error: Style::new().red().bright().bold(),
             log_keyword_warn: Style::new().yellow().bright().bold(),
             log_keyword_ok: Style::new().yellow().bright().bold(),
+
+            ai_header: Style::new().yellow().bright().bold(),
+            ai_separator: Style::new().yellow().bright(),
+            ai_spinner: Style::new().yellow().bright(),
+            ai_error: Style::new().red().bright().bold(),
+            ai_body: Style::new().white().bright(),
         }
     }
 
@@ -109,7 +127,13 @@ impl Palette {
             log_prompt: s.clone(),
             log_keyword_error: s.clone(),
             log_keyword_warn: s.clone(),
-            log_keyword_ok: s,
+            log_keyword_ok: s.clone(),
+
+            ai_header: s.clone(),
+            ai_separator: s.clone(),
+            ai_spinner: s.clone(),
+            ai_error: s.clone(),
+            ai_body: s,
         }
     }
 }

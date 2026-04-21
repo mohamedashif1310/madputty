@@ -105,14 +105,16 @@ impl KiroInvoker {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::io::Write;
     use tempfile::NamedTempFile;
 
-    /// Helper: create a .bat file that blocks for a long time (pings localhost).
+    /// Helper: create a script that blocks for a long time.
+    /// Uses .bat on Windows and an executable shell script elsewhere so the
+    /// kiro_invoker tests pass on any host the crate builds on.
+    #[cfg(windows)]
     fn make_slow_bat() -> NamedTempFile {
         let mut f = NamedTempFile::with_suffix(".bat").unwrap();
         writeln!(f, "@echo off").unwrap();
@@ -121,13 +123,41 @@ mod tests {
         f
     }
 
-    /// Helper: create a .bat file that writes to stderr and exits non-zero.
+    #[cfg(not(windows))]
+    fn make_slow_bat() -> NamedTempFile {
+        use std::os::unix::fs::PermissionsExt;
+        let mut f = NamedTempFile::with_suffix(".sh").unwrap();
+        writeln!(f, "#!/bin/sh").unwrap();
+        writeln!(f, "sleep 30").unwrap();
+        f.flush().unwrap();
+        let mut perms = std::fs::metadata(f.path()).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(f.path(), perms).unwrap();
+        f
+    }
+
+    /// Helper: create a script that writes to stderr and exits non-zero.
+    #[cfg(windows)]
     fn make_failing_bat(stderr_msg: &str, exit_code: u8) -> NamedTempFile {
         let mut f = NamedTempFile::with_suffix(".bat").unwrap();
         writeln!(f, "@echo off").unwrap();
         writeln!(f, "echo {}>&2", stderr_msg).unwrap();
         writeln!(f, "exit /b {}", exit_code).unwrap();
         f.flush().unwrap();
+        f
+    }
+
+    #[cfg(not(windows))]
+    fn make_failing_bat(stderr_msg: &str, exit_code: u8) -> NamedTempFile {
+        use std::os::unix::fs::PermissionsExt;
+        let mut f = NamedTempFile::with_suffix(".sh").unwrap();
+        writeln!(f, "#!/bin/sh").unwrap();
+        writeln!(f, "echo '{}' 1>&2", stderr_msg).unwrap();
+        writeln!(f, "exit {}", exit_code).unwrap();
+        f.flush().unwrap();
+        let mut perms = std::fs::metadata(f.path()).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(f.path(), perms).unwrap();
         f
     }
 
@@ -260,10 +290,12 @@ mod tests {
     /// Test invoke() returns AiError::SpawnFailed for a non-existent executable.
     #[tokio::test]
     async fn test_invoke_spawn_failed() {
-        let invoker = KiroInvoker::new(
-            PathBuf::from("C:\\nonexistent\\path\\to\\kiro-cli.exe"),
-            10,
-        );
+        #[cfg(windows)]
+        let bogus = PathBuf::from("C:\\nonexistent\\path\\to\\kiro-cli.exe");
+        #[cfg(not(windows))]
+        let bogus = PathBuf::from("/nonexistent/path/to/kiro-cli");
+
+        let invoker = KiroInvoker::new(bogus, 10);
         let result = invoker.invoke("test").await;
 
         match result {

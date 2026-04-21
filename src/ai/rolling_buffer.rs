@@ -46,6 +46,12 @@ impl RollingBuffer {
     pub fn len(&self) -> usize {
         self.inner.lock().unwrap().len()
     }
+
+    /// Returns true if the buffer is empty.
+    #[allow(dead_code)]
+    pub fn is_empty(&self) -> bool {
+        self.inner.lock().unwrap().is_empty()
+    }
 }
 
 impl Default for RollingBuffer {

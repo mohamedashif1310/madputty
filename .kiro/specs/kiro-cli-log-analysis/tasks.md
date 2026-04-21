@@ -11,7 +11,7 @@ Additive AI analysis lane for the madputty serial terminal, powered by `kiro-cli
   - Run `cargo check` to verify resolution
   - _Requirements: 18.1, 18.2_
 
-- [ ] 2. Create `src/ai/rolling_buffer.rs` — RollingBuffer
+- [x] 2. Create `src/ai/rolling_buffer.rs` — RollingBuffer
   - [x] 2.1 Implement `RollingBuffer` struct with `Arc<Mutex<VecDeque<String>>>` and capacity of 50
     - `push(&self, line: String)` — lock, push_back, pop_front if over capacity
     - `snapshot(&self) -> Vec<String>` — lock, clone into Vec
@@ -24,7 +24,7 @@ Additive AI analysis lane for the madputty serial terminal, powered by `kiro-cli
     - Test empty buffer snapshot returns empty vec
     - _Requirements: 17.1, 17.2, 17.3_
 
-- [ ] 3. Create `src/ai/redactor.rs` — Redaction engine
+- [x] 3. Create `src/ai/redactor.rs` — Redaction engine
   - [x] 3.1 Implement `Redactor` struct with 6 compiled regex patterns
     - `new()` — compile all patterns once at construction
     - `redact(&self, input: &str) -> String` — apply all patterns sequentially
@@ -43,7 +43,7 @@ Additive AI analysis lane for the madputty serial terminal, powered by `kiro-cli
     - Test that non-sensitive text passes through unchanged
     - _Requirements: 6.2, 6.3, 6.4, 6.5, 6.6, 6.7_
 
-- [ ] 4. Create `src/ai/kiro_invoker.rs` — Shell out to kiro-cli
+- [x] 4. Create `src/ai/kiro_invoker.rs` — Shell out to kiro-cli
   - [x] 4.1 Implement `KiroInvoker` struct
     - `kiro_path: PathBuf` and `timeout: Duration` fields
     - `invoke(&self, prompt: &str) -> Result<String, AiError>` — spawn `kiro-cli chat --no-interactive <prompt>`, enforce timeout via `tokio::time::timeout`, kill on timeout, return stdout on success
@@ -57,7 +57,7 @@ Additive AI analysis lane for the madputty serial terminal, powered by `kiro-cli
     - Test non-zero exit code error extraction
     - _Requirements: 11.4, 11.6_
 
-- [ ] 5. Create `src/ai/error_scanner.rs` — Error pattern matching with debounce
+- [x] 5. Create `src/ai/error_scanner.rs` — Error pattern matching with debounce
   - [x] 5.1 Implement `ErrorScanner` struct
     - Compiled regex patterns for: `" E "`, `"ERROR"`, `"FAIL"`, `"FAILED"`, `"PANIC"`, `"EXCEPTION"`, `"TIMEOUT"`
     - `last_trigger: Option<Instant>` for 30s debounce
@@ -75,7 +75,7 @@ Additive AI analysis lane for the madputty serial terminal, powered by `kiro-cli
   - Add methods for updating state: `set_response`, `set_error`, `set_spinner`, `open_modal`, `close_modal`, `scroll_modal`
   - _Requirements: 8.1, 8.3, 8.4, 8.5, 8.6, 8.7, 8.8_
 
-- [ ] 7. Create `src/ai/response_log.rs` — Append-only Markdown response log
+- [x] 7. Create `src/ai/response_log.rs` — Append-only Markdown response log
   - [x] 7.1 Implement `ResponseLog` struct
     - `path: PathBuf` — `~/.madputty/ai-responses/<session_id>.md`
     - `has_entries: bool` — track whether anything was written
@@ -90,7 +90,7 @@ Additive AI analysis lane for the madputty serial terminal, powered by `kiro-cli
     - Test has_entries tracking
     - _Requirements: 12.3, 12.4, 12.6_
 
-- [ ] 8. Create `src/ai/mod.rs` — AiSubsystem orchestrator
+- [x] 8. Create `src/ai/mod.rs` — AiSubsystem orchestrator
   - [x] 8.1 Implement `AiSubsystem` struct with kiro-cli detection
     - `detect(no_ai: bool) -> Self` — PATH lookup for `kiro-cli`/`kiro-cli.exe`, probe login via `kiro-cli whoami --no-interactive` with 5s timeout
     - Print appropriate stderr notes per detection outcome
@@ -104,7 +104,7 @@ Additive AI analysis lane for the madputty serial terminal, powered by `kiro-cli
     - Custom question prompt construction
     - _Requirements: 3.1, 3.2, 4.4, 7.1, 7.2, 7.3_
 
-- [ ] 9. Create `src/ui/split_pane.rs` — SplitPaneRenderer
+- [x] 9. Create `src/ui/split_pane.rs` — SplitPaneRenderer
   - [x] 9.1 Implement `SplitPaneRenderer` struct
     - Compute dimensions: `ai_pane_height = max(6, height * 20 / 100)`, `log_region_height = height - ai_pane_height - 1`
     - `setup()` — set ANSI scroll region `\x1b[1;{log_region_height}r`
@@ -125,12 +125,12 @@ Additive AI analysis lane for the madputty serial terminal, powered by `kiro-cli
   - Re-export `SplitPaneRenderer` and related types from `split_pane`
   - _Requirements: N/A (structural)_
 
-- [-] 11. Checkpoint — New modules compile independently
+- [x] 11. Checkpoint — New modules compile independently
   - Ensure `cargo check` passes with all new `src/ai/` and `src/ui/` modules
   - Ensure all tests pass, ask the user if questions arise.
 
-- [ ] 12. Extend `src/io/keymap.rs` — Replace ExitStateMachine with HotkeyDispatcher
-  - [ ] 12.1 Implement `HotkeyAction` enum and `HotkeyDispatcher` struct
+- [x] 12. Extend `src/io/keymap.rs` — Replace ExitStateMachine with HotkeyDispatcher
+  - [x] 12.1 Implement `HotkeyAction` enum and `HotkeyDispatcher` struct
     - `HotkeyAction`: `Forward(Vec<u8>)`, `Exit`, `Analyze`, `AskQuestion`, `ShowLastResponse`, `Continue`
     - `HotkeyDispatcher` with `armed: bool` and `ai_enabled: bool`
     - State machine: Armed + `a`/`A` → Analyze, Armed + `q`/`Q` → AskQuestion, Armed + `l`/`L` → ShowLastResponse, Armed + Ctrl+X → Exit
@@ -138,46 +138,46 @@ Additive AI analysis lane for the madputty serial terminal, powered by `kiro-cli
     - Keep `ExitStateMachine` as a type alias or deprecate for backward compat
     - _Requirements: 3.5, 3.6, 3.8, 4.7, 9.5, 15.2_
 
-  - [ ] 12.2 Write unit tests for HotkeyDispatcher
+  - [x] 12.2 Write unit tests for HotkeyDispatcher
     - Test all Ctrl+A + letter combinations
     - Test ai_enabled=false disables AI hotkeys
     - Test armed state resets correctly
     - _Requirements: 3.6, 3.8, 15.2_
 
-- [ ] 13. Update `src/cli.rs` — Add AI flags and subcommands
+- [x] 13. Update `src/cli.rs` — Add AI flags and subcommands
   - Add flags: `--ai-watch` (bool), `--ai-timeout-seconds` (u32, default 30), `--no-redact` (bool), `--no-ai` (bool)
   - Add subcommands: `KiroLogin`, `KiroStatus` to `Subcmd` enum
   - Preserve all existing flags and `List` subcommand unchanged
   - _Requirements: 13.1, 13.2, 13.3, 13.4, 13.5, 14.1, 14.2, 14.3, 14.4_
 
-- [ ] 14. Update `src/errors.rs` — Add AiError variant
+- [x] 14. Update `src/errors.rs` — Add AiError variant
   - Add `#[error("AI error: {0}")] AiError(String)` variant to `MadPuttyError`
   - Maps to `ExitCode::General`
   - Non-fatal during sessions (caught by AI task, rendered in pane)
   - _Requirements: design error handling section_
 
-- [ ] 15. Update `src/theme.rs` — Add AI pane styles
+- [x] 15. Update `src/theme.rs` — Add AI pane styles
   - Add to `Palette`: `ai_header`, `ai_separator`, `ai_spinner`, `ai_error`, `ai_body`
   - Amazon-yellow bold for header, yellow box-drawing for separator, red for errors, white for body
   - Add corresponding plain-mode entries
   - _Requirements: 8.1, 8.2, 8.5_
 
-- [ ] 16. Update `src/session.rs` — Integrate AI subsystem
-  - [ ] 16.1 Wire SplitPaneRenderer into session
+- [x] 16. Update `src/session.rs` — Integrate AI subsystem
+  - [x] 16.1 Wire SplitPaneRenderer into session
     - Replace direct stdout writes with `SplitPaneRenderer::write_log` when AI enabled
     - Route colorizer output through renderer's log region
     - Handle resize events to call `renderer.on_resize()`
     - Move status bar to last row via renderer
     - _Requirements: 2.1, 2.5, 2.7, 16.1, 16.2_
 
-  - [ ] 16.2 Spawn AI subsystem tasks
+  - [x] 16.2 Spawn AI subsystem tasks
     - Create `RollingBuffer` and fan-out from port_reader via `try_send` on bounded channel(32)
     - Spawn error scanner task consuming from bounded channel
     - Spawn AI task on hotkey trigger or auto-watch trigger
     - Cancel previous AI task when new one starts (latest wins)
     - _Requirements: 3.1, 3.2, 3.3, 5.1, 5.2, 5.3, 16.3, 16.4, 16.5, 16.7_
 
-  - [ ] 16.3 Wire hotkey dispatch
+  - [x] 16.3 Wire hotkey dispatch
     - Replace `ExitStateMachine` usage with `HotkeyDispatcher`
     - Route `Analyze` → snapshot + AI task
     - Route `AskQuestion` → open input prompt in AI pane
@@ -185,38 +185,38 @@ Additive AI analysis lane for the madputty serial terminal, powered by `kiro-cli
     - Handle login-state-false case with warning message
     - _Requirements: 3.1, 3.7, 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7, 4.8, 9.1, 9.2, 9.3, 9.4, 9.6_
 
-  - [ ] 16.4 Manage session lifecycle with AI
+  - [x] 16.4 Manage session lifecycle with AI
     - Detect kiro-cli at session start via `AiSubsystem::detect()`
     - Handle `--no-redact` warning, `--ai-watch` + disabled warning, `--no-ai` override warning
     - Print AI response log path on exit if entries exist
     - Skip AI response log creation when AI disabled
     - _Requirements: 1.5, 1.6, 1.8, 5.7, 6.9, 6.10, 12.5, 12.6, 13.6, 15.1, 15.3, 15.4, 15.5_
 
-- [ ] 17. Update `src/main.rs` — Add mod declarations and subcommand dispatch
+- [x] 17. Update `src/main.rs` — Add mod declarations and subcommand dispatch
   - Add `mod ai;` and `mod ui;` declarations
   - Dispatch `KiroLogin` → spawn `kiro-cli login` with inherited stdio, exit with child's code
   - Dispatch `KiroStatus` → spawn `kiro-cli whoami --no-interactive`, print output, exit appropriately
   - Handle kiro-cli not found for both subcommands
   - _Requirements: 10.1, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7, 14.1, 14.2_
 
-- [ ] 18. Checkpoint — `cargo check` passes
+- [x] 18. Checkpoint — `cargo check` passes
   - Ensure `cargo check` passes with all modifications wired together
   - Ensure all tests pass, ask the user if questions arise.
 
-- [ ] 19. Update README.md with AI flags and hotkey table
+- [x] 19. Update README.md with AI flags and hotkey table
   - Document `--ai-watch`, `--ai-timeout-seconds`, `--no-redact`, `--no-ai` flags
   - Document `kiro-login` and `kiro-status` subcommands
   - Add hotkey table: Ctrl+A A (analyze), Ctrl+A Q (question), Ctrl+A L (last response), Ctrl+A X (exit)
   - Document AI pane behavior and auto-watch mode
   - _Requirements: 13.1, 13.2, 13.3, 13.4, 14.1, 14.2_
 
-- [ ] 20. Update PROJECT_OVERVIEW.md with kiro-cli integration section
+- [x] 20. Update PROJECT_OVERVIEW.md with kiro-cli integration section
   - Add section describing the AI subsystem architecture
   - Document the two-lane design and non-blocking guarantee
   - List new modules in `src/ai/` and `src/ui/`
   - _Requirements: N/A (documentation)_
 
-- [ ] 21. Final checkpoint — All tests pass
+- [x] 21. Final checkpoint — All tests pass
   - Ensure `cargo check` and `cargo test` pass
   - Ensure all tests pass, ask the user if questions arise.
 

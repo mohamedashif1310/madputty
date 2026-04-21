@@ -169,7 +169,7 @@ fn is_level_boundary(s: &str) -> bool {
 /// Color all `[...]` bracketed segments as module tags.
 fn highlight_brackets(s: &str, p: &Palette) -> String {
     let mut out = String::with_capacity(s.len());
-    let mut chars = s.chars().peekable();
+    let chars = s.chars().peekable();
     let mut in_bracket = false;
     let mut buf = String::new();
 

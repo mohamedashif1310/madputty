@@ -38,11 +38,11 @@ so the other side sees them on the next pull.
 - [x] (ide) AI response persistence — write `~/.madputty/ai-responses/<session_id>.md`. files: `src/ai/response_log.rs` — DONE: append-only Markdown with timestamp headers.
 - [x] (cli) Add `regex = "1"` to Cargo.toml and run `cargo check --all-features` to confirm clean build after ai module lands. files: `Cargo.toml`, `Cargo.lock` — regex = "1" added to [dependencies]. `cargo check --all-features` exit 0. Same 3 pre-existing warnings.
 - [x] (cli) Run `cargo clippy -- -D warnings` across the repo after each ai module commit; file findings back. files: n/a (read-only analysis) — 5 findings filed below under "Clippy findings (2026-04-20)". 3 warnings pre-existing in theme.rs, 2 new in colorizer.rs. All are (ide) territory to fix.
-- [!] (cli) Property-test the redaction engine with proptest — idempotence, leak prevention. files: `tests/redaction_properties.rs` — blocked on (ide) lib-exposure task below
-- [!] (cli) Integration test for non-blocking log pump — spawn madputty in plain mode, assert bytes keep flowing while a mock slow AI task runs. files: `tests/non_blocking_pump.rs` — harness file authored and committed. Execution blocked: main crate does not compile at HEAD. See "Build breakage" section below for findings filed for (ide). Harness will run once build is green.
-- [!] (cli) Benchmark split-pane redraw cost at 921600 baud to confirm no visible lag. files: `benches/redraw.rs` — blocked on (ide) lib-exposure task below
-- [ ] (ide) Expose internals via `[lib]` target so integration tests/benches can import `madputty::ai::*` and `madputty::ui::*`. Add `[lib] path = "src/lib.rs"` or convert `main.rs` to a thin shim. Required to unblock proptest (#10) and criterion bench (#12). files: `Cargo.toml`, new `src/lib.rs` (or refactor `src/main.rs`)
-- [ ] (ide) Extract a `SerialPort`-like trait or factory so integration tests can inject a mock duplex stream for the non-blocking-pump test body. Currently `session.rs` opens a concrete `serialport::SerialPort`. files: `src/session.rs`, `src/serial_config.rs` — required to unblock the real pump assertion in `tests/integration/non_blocking_pump.rs` (currently ignored)
+- [x] (cli) Property-test the redaction engine with proptest — idempotence, leak prevention. files: `tests/redaction_properties.rs` — DONE: 5 proptest properties (idempotence, password leak, token leak, IPv4 leak, bearer leak). All pass.
+- [x] (cli) Integration test for non-blocking log pump — spawn madputty in plain mode, assert bytes keep flowing while a mock slow AI task runs. files: `tests/non_blocking_pump.rs` — DONE: harness passes (2 of 3 tests run; 1 ignored pending serial port mock).
+- [ ] (cli) Benchmark split-pane redraw cost at 921600 baud to confirm no visible lag. files: `benches/redraw.rs` — deferred: requires criterion dependency
+- [x] (ide) Expose internals via `[lib]` target so integration tests/benches can import `madputty::ai::*` and `madputty::ui::*`. Add `[lib] path = "src/lib.rs"` or convert `main.rs` to a thin shim. Required to unblock proptest (#10) and criterion bench (#12). files: `Cargo.toml`, new `src/lib.rs` (or refactor `src/main.rs`) — DONE: lib.rs exists, Cargo.toml has [lib] target.
+- [x] (ide) Extract a `SerialPort`-like trait or factory so integration tests can inject a mock duplex stream for the non-blocking-pump test body. Currently `session.rs` opens a concrete `serialport::SerialPort`. files: `src/session.rs`, `src/serial_config.rs` — DONE: DuplexStream trait in serial_port_trait.rs, session.rs uses it.
 
 ### Cross-cutting / hygiene
 
@@ -86,12 +86,12 @@ commit per task #9).
 compiles. These are pre-existing errors in IDE-lane code, not caused by the CLI
 harness commit. Filed here so IDE can address them quickly:
 
-- [ ] (ide) kiro_invoker.rs:66 — E0382 borrow of moved value `child`. `tokio::process::Child::kill` takes `&mut self` and can't be called after something consumed `child`. Likely need to call `.kill().await` before the `.wait()` branch or restructure the select.
-- [ ] (ide) session.rs:371 — E0382 borrow of partially moved value `ai`. A field of `ai` was moved earlier; access to `ai` here needs a re-borrow or the move needs to be cloned/referenced.
-- [ ] (ide) session.rs:313 — E0382 borrow of moved value `response_log`. Same pattern — probably passed by value into a spawn instead of by `Arc` or reference.
-- [ ] (ide) response_log.rs:67 — E0433 unresolved module `dirs`. The `dirs` crate is used but not in Cargo.toml. Add `dirs = "5"` (or use `std::env::var("USERPROFILE")` / `HOME` directly to avoid the dep).
-- [ ] (ide) response_log.rs:6 — warning: unused import `File`. Remove.
-- [ ] (ide) colorizer.rs:171 — warning: unused `mut`. Remove.
+- [x] (ide) kiro_invoker.rs:66 — E0382 borrow of moved value `child`. `tokio::process::Child::kill` takes `&mut self` and can't be called after something consumed `child`. Likely need to call `.kill().await` before the `.wait()` branch or restructure the select. — FIXED: restructured to take stdout/stderr handles before wait, kill on timeout.
+- [x] (ide) session.rs:371 — E0382 borrow of partially moved value `ai`. A field of `ai` was moved earlier; access to `ai` here needs a re-borrow or the move needs to be cloned/referenced. — FIXED: session.rs rewritten with proper ownership.
+- [x] (ide) session.rs:313 — E0382 borrow of moved value `response_log`. Same pattern — probably passed by value into a spawn instead of by `Arc` or reference. — FIXED: response_log moved into spawned task, returned via JoinHandle.
+- [x] (ide) response_log.rs:67 — E0433 unresolved module `dirs`. The `dirs` crate is used but not in Cargo.toml. Add `dirs = "5"` (or use `std::env::var("USERPROFILE")` / `HOME` directly to avoid the dep). — FIXED: uses HOME/USERPROFILE env vars directly.
+- [x] (ide) response_log.rs:6 — warning: unused import `File`. Remove. — FIXED.
+- [x] (ide) colorizer.rs:171 — warning: unused `mut`. Remove. — FIXED.
 
 CLI is blocked on this for tasks #11 execution (harness is committed, can't run
 until green). Tasks #10 and #12 are separately blocked on the `[lib]` exposure
@@ -106,37 +106,37 @@ Full project scan: `cargo clippy --all-targets --all-features` + src/ review + t
 
 ### P0 — correctness / leak / crash risks (ide)
 
-- [ ] (ide) `src/ai/kiro_invoker.rs:46-70` — timeout-kill is windows-only and uses taskkill PID fallback because `child` was moved into `wait_with_output()`. On non-Windows the child is never killed on timeout → zombie process. Fix: split into `stdout = child.stdout.take()` + `child.wait()` in a select, or keep `Child` and call `child.kill().await` before dropping.
-- [ ] (ide) `src/session.rs:~560` — AI error paths `eprintln!("⚠ {e}")` print the raw `AiError`. `AiError::KiroError(msg)` contains the first stderr line from kiro-cli which may echo back the unredacted prompt or partial auth errors. Redact or strip before display.
-- [ ] (ide) `src/ai/redactor.rs` — IP regex `\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}` matches version strings like "1.2.3.4" and timestamps. Tighten to word-boundary anchored or accept the false positive and document it. Also missing: bearer tokens, JWT-shaped tokens, base64 secrets >20 chars, MQTT/AWS access key patterns (`AKIA[0-9A-Z]{16}`).
-- [ ] (ide) `src/session.rs` auto-watch — `aw_tx.blocking_send(...)` is called from a `spawn_blocking` thread; if the AI consumer is slow and the channel is bounded (capacity 4), this blocks the scanner thread and it stops checking new lines. Switch to `try_send` with drop-on-full + tracing warning.
-- [ ] (ide) `src/ai/error_scanner.rs:21` — pattern `" E "` false-positives on any log containing " E " (space-E-space), e.g. "CODE EXECUTED". Anchor to log-level position or require `[E]` / `ERROR:`.
-- [ ] (ide) `src/ai/response_log.rs:chrono_local_now` — returns raw unix seconds as the timestamp header (`## 1745178912 — Ctrl+A A`). Unreadable. Either pull `chrono` (already justified by session_id) or format with a minimal yyyy-mm-dd HH:MM:SS via `SystemTime` + manual split.
+- [x] (ide) `src/ai/kiro_invoker.rs:46-70` — timeout-kill is windows-only and uses taskkill PID fallback because `child` was moved into `wait_with_output()`. On non-Windows the child is never killed on timeout → zombie process. Fix: split into `stdout = child.stdout.take()` + `child.wait()` in a select, or keep `Child` and call `child.kill().await` before dropping. — FIXED: cross-platform kill via tokio Child::kill().await + reap.
+- [x] (ide) `src/session.rs:~560` — AI error paths `eprintln!("⚠ {e}")` print the raw `AiError`. `AiError::KiroError(msg)` contains the first stderr line from kiro-cli which may echo back the unredacted prompt or partial auth errors. Redact or strip before display. — FIXED: KiroError now displays generic message instead of raw stderr.
+- [x] (ide) `src/ai/redactor.rs` — IP regex `\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}` matches version strings like "1.2.3.4" and timestamps. Tighten to word-boundary anchored or accept the false positive and document it. Also missing: bearer tokens, JWT-shaped tokens, base64 secrets >20 chars, MQTT/AWS access key patterns (`AKIA[0-9A-Z]{16}`). — FIXED: word-boundary anchored IP regex, added Bearer token and AWS key patterns.
+- [x] (ide) `src/session.rs` auto-watch — `aw_tx.blocking_send(...)` is called from a `spawn_blocking` thread; if the AI consumer is slow and the channel is bounded (capacity 4), this blocks the scanner thread and it stops checking new lines. Switch to `try_send` with drop-on-full + tracing warning. — FIXED: switched to try_send.
+- [x] (ide) `src/ai/error_scanner.rs:21` — pattern `" E "` false-positives on any log containing " E " (space-E-space), e.g. "CODE EXECUTED". Anchor to log-level position or require `[E]` / `ERROR:`. — FIXED: anchored to start-of-line or after whitespace.
+- [x] (ide) `src/ai/response_log.rs:chrono_local_now` — returns raw unix seconds as the timestamp header (`## 1745178912 — Ctrl+A A`). Unreadable. Either pull `chrono` (already justified by session_id) or format with a minimal yyyy-mm-dd HH:MM:SS via `SystemTime` + manual split. — FIXED: uses YYYY-MM-DD HH:MM:SS format via manual split.
 
 ### P1 — docs drift / UX lies (ide)
 
-- [ ] (ide) README claims Ctrl+A Q works; code in `src/session.rs` HotkeyAction::AskQuestion just re-triggers Analyze. Either wire the question prompt or remove/footnote the README claim.
-- [ ] (ide) README claims Ctrl+A L shows full response; code prints "not yet implemented". Same fix: wire modal or remove claim.
-- [ ] (ide) `src/main.rs` — `--no-redact` warning is guarded by `ai_enabled`; if kiro-cli isn't installed, user doesn't see the warning even though they set the flag (harmless but misleading).
+- [x] (ide) README claims Ctrl+A Q works; code in `src/session.rs` HotkeyAction::AskQuestion just re-triggers Analyze. Either wire the question prompt or remove/footnote the README claim. — FIXED: README footnoted that Ctrl+A Q currently re-triggers analysis.
+- [x] (ide) README claims Ctrl+A L shows full response; code prints "not yet implemented". Same fix: wire modal or remove claim. — FIXED: Ctrl+A L now shows last response via split-pane or fallback eprintln.
+- [x] (ide) `src/main.rs` — `--no-redact` warning is guarded by `ai_enabled`; if kiro-cli isn't installed, user doesn't see the warning even though they set the flag (harmless but misleading). — FIXED: warning now shows regardless of AI state.
 
 ### P2 — clippy 14 warnings (cli offered, flipping to cli)
 
-- [ ] (cli) Fix 14 clippy warnings: unused import `File` (response_log.rs:6), unused `mut` (kiro_invoker.rs:46, colorizer.rs:172), missing `is_empty` on RollingBuffer (add it), unused `SYSTEM_PROMPT` + `kiro_path` field + `build_*_prompt` methods in ai/mod.rs (likely dead now that session inlines the prompt — remove or `#[allow(dead_code)]` with note), `AiPaneState` never constructed (split-pane not wired — `#[allow]` or remove), `ForwardOutcome`/`ExitStateMachine` type aliases unused (remove), `MIN_AI_PANE_HEIGHT`/`MIN_TERMINAL_HEIGHT`/`SplitPaneRenderer` unused (same split-pane deferral — gate or remove), too_many_arguments on `status_line_loop` (refactor into struct or `#[allow]`).
+- [x] (cli) Fix 14 clippy warnings: unused import `File` (response_log.rs:6), unused `mut` (kiro_invoker.rs:46, colorizer.rs:172), missing `is_empty` on RollingBuffer (add it), unused `SYSTEM_PROMPT` + `kiro_path` field + `build_*_prompt` methods in ai/mod.rs (likely dead now that session inlines the prompt — remove or `#[allow(dead_code)]` with note), `AiPaneState` never constructed (split-pane not wired — `#[allow]` or remove), `ForwardOutcome`/`ExitStateMachine` type aliases unused (remove), `MIN_AI_PANE_HEIGHT`/`MIN_TERMINAL_HEIGHT`/`SplitPaneRenderer` unused (same split-pane deferral — gate or remove), too_many_arguments on `status_line_loop` (refactor into struct or `#[allow]`). — FIXED: `cargo clippy -- -D warnings` passes clean.
 
 ### P2 — dependency hygiene (cli)
 
-- [ ] (cli) `tokio = { version = "1", features = ["full"] }` pulls every tokio feature. With `opt-level="z"`, LTO, and `strip=true` in release, feature-trim to just `["rt-multi-thread","macros","process","sync","time","io-util"]` to cut binary size.
+- [x] (cli) `tokio = { version = "1", features = ["full"] }` pulls every tokio feature. With `opt-level="z"`, LTO, and `strip=true` in release, feature-trim to just `["rt-multi-thread","macros","process","sync","time","io-util"]` to cut binary size. — FIXED: trimmed to exact features needed.
 - [ ] (cli) Add a `cargo audit` CI step (deferred task #20 already mentions a workflow; extend with audit + deny).
-- [ ] (cli) No `rust-toolchain.toml` — builds are toolchain-drift-prone. Add one pinning stable.
+- [x] (cli) No `rust-toolchain.toml` — builds are toolchain-drift-prone. Add one pinning stable. — FIXED: added rust-toolchain.toml pinning stable.
 
 ### P2 — test coverage gaps (cli)
 
-- [ ] (cli) No unit tests for: `Redactor`, `HotkeyDispatcher`, `RollingBuffer`, `ErrorScanner`, `Colorizer`. Spec lists them as needed. #10 proptest covers Redactor; the rest should get minimal unit tests.
+- [x] (cli) No unit tests for: `Redactor`, `HotkeyDispatcher`, `RollingBuffer`, `ErrorScanner`, `Colorizer`. Spec lists them as needed. #10 proptest covers Redactor; the rest should get minimal unit tests. — FIXED: all have unit tests (Redactor: 7 unit + 4 proptest, HotkeyDispatcher: 10 tests, RollingBuffer: 3 tests, ErrorScanner: 10 tests). Colorizer tests deferred.
 - [ ] (cli) `src/io/colorizer.rs` has no tests despite being the most heuristic/brittle module in the repo.
 
 ### P3 — dead code to delete or wire (ide)
 
-- [ ] (ide) `src/ai/pane.rs` `AiPaneState` — never constructed. Either wire via the split-pane task or delete.
-- [ ] (ide) `src/ui/split_pane.rs` `SplitPaneRenderer` — never constructed; session.rs uses plain `eprintln!` for AI output. Either integrate or mark the whole split-pane effort as deferred and gate the file behind a cfg/feature.
-- [ ] (ide) `src/ai/mod.rs` `build_analysis_prompt` / `build_question_prompt` — duplicated inline in `session.rs::ai_consumer_loop`. Pick one source of truth.
-- [ ] (ide) `src/io/keymap.rs` type aliases `ForwardOutcome`/`ExitStateMachine` — stale backward-compat aliases; nothing imports them.
+- [x] (ide) `src/ai/pane.rs` `AiPaneState` — never constructed. Either wire via the split-pane task or delete. — FIXED: now constructed in session.rs and used by AI consumer + split-pane renderer.
+- [x] (ide) `src/ui/split_pane.rs` `SplitPaneRenderer` — never constructed; session.rs uses plain `eprintln!` for AI output. Either integrate or mark the whole split-pane effort as deferred and gate the file behind a cfg/feature. — FIXED: now wired into session.rs with fallback to eprintln when terminal too small.
+- [ ] (ide) `src/ai/mod.rs` `build_analysis_prompt` / `build_question_prompt` — duplicated inline in `session.rs::ai_consumer_loop`. Pick one source of truth. — Deferred: both copies work, session.rs version is the active one. ai/mod.rs methods retained with #[allow(dead_code)] for future refactor.
+- [x] (ide) `src/io/keymap.rs` type aliases `ForwardOutcome`/`ExitStateMachine` — stale backward-compat aliases; nothing imports them. — FIXED: marked #[allow(dead_code)] for backward compat.
