@@ -103,18 +103,21 @@ async fn kiro_login() -> Result<(), MadPuttyError> {
     }
 }
 
-/// Delegate to `kiro-cli whoami --no-interactive`.
+/// Delegate to `kiro-cli whoami`.
+///
+/// `whoami` does not accept `--no-interactive`; we inherit stdio so the user
+/// sees the real output (Builder ID, profile, etc.).
 async fn kiro_status() -> Result<(), MadPuttyError> {
     let kiro_path = ai::find_kiro_cli_or_error()?;
     let status = std::process::Command::new(&kiro_path)
-        .args(["whoami", "--no-interactive"])
+        .arg("whoami")
         .status()
         .map_err(|e| MadPuttyError::AiError(format!("failed to run kiro-cli whoami: {e}")))?;
     if status.success() {
         Ok(())
     } else {
         Err(MadPuttyError::AiError(
-            "kiro-cli: not logged in".to_string(),
+            "kiro-cli: not logged in (run `madputty kiro-login`)".to_string(),
         ))
     }
 }

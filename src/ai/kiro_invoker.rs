@@ -43,19 +43,18 @@ impl KiroInvoker {
         }
     }
 
-    /// Invoke `kiro-cli chat --no-interactive "<prompt>"`.
+    /// Invoke `kiro-cli chat --no-interactive --trust-all-tools "<prompt>"`.
     /// Returns the AI response text or an error.
     ///
     /// On timeout, kills the child process and reaps it to avoid zombies.
     /// On non-zero exit, returns the first line of stderr as the error message.
-    /// Invoke `kiro-cli chat --no-interactive "<prompt>"`.
-    /// Returns the AI response text or an error.
     ///
-    /// On timeout, kills the child process and reaps it to avoid zombies.
-    /// On non-zero exit, returns the first line of stderr as the error message.
+    /// Note: `--trust-all-tools` is required because headless mode has no
+    /// user to approve tool invocations. Without it, kiro-cli will block
+    /// indefinitely or error out when a prompt triggers a tool call.
     pub async fn invoke(&self, prompt: &str) -> Result<String, AiError> {
         let mut child = Command::new(&self.kiro_path)
-            .args(["chat", "--no-interactive", prompt])
+            .args(["chat", "--no-interactive", "--trust-all-tools", prompt])
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()

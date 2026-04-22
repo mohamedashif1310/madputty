@@ -91,6 +91,19 @@ madputty kiro-status
 | `--no-redact` | off | Disable credential redaction (with warning) |
 | `--no-ai` | off | Force AI off even if kiro-cli is installed |
 
+### Authentication requirements
+
+madputty uses `kiro-cli chat --no-interactive --trust-all-tools` under the hood. For this to work you need one of:
+
+- **Interactive login** — run `kiro-cli login` (opens a browser or shows a device code). Your login state is shared with madputty. Verify with `kiro-cli whoami` or `madputty kiro-status`.
+- **API key** — set the `KIRO_API_KEY` environment variable to a Kiro Pro/Pro+/Power API key (required for CI/headless use).
+
+If you see "Midway authentication required" inside madputty but `kiro-cli` works fine in another terminal, check:
+
+1. Run `kiro-cli whoami` in the same shell as madputty. If that fails, the shell is missing your Midway cookie (re-login with `mwinit` on Amazon corporate machines, then `kiro-cli login`).
+2. Make sure you launched madputty from a shell that inherits your auth environment (don't launch via a clean `cmd` window or a new SSH session without `mwinit`).
+3. The `--ai-timeout-seconds` default (30s) may not be enough on slow corporate networks — try `--ai-timeout-seconds 60`.
+
 ### How it works
 
 - Terminal splits: top ~80% shows live logs (never stops), bottom ~20% shows AI analysis

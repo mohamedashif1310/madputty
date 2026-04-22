@@ -70,11 +70,18 @@ impl AiSubsystem {
         }
 
         let path = kiro_path.unwrap();
-        let logged_in = check_login(&path).await;
+        let (logged_in, diag) = check_login(&path).await;
         if !logged_in {
-            eprintln!(
-                "⚠ kiro-cli found but not logged in. Run `madputty kiro-login` to enable AI."
-            );
+            if let Some(stderr_line) = diag {
+                eprintln!(
+                    "⚠ kiro-cli found but login check failed ({stderr_line}). \
+                     Run `madputty kiro-login` or `kiro-cli login`."
+                );
+            } else {
+                eprintln!(
+                    "⚠ kiro-cli found but not logged in. Run `madputty kiro-login` to enable AI."
+                );
+            }
         }
 
         let invoker = KiroInvoker::new(path.clone(), timeout_seconds);
@@ -292,19 +299,44 @@ pub fn find_kiro_cli_or_error() -> Result<PathBuf, crate::errors::MadPuttyError>
     })
 }
 
-/// Probe login state by running `kiro-cli whoami --no-interactive` with a 5s timeout.
-async fn check_login(kiro_path: &PathBuf) -> bool {
+/// Probe login state by running `kiro-cli whoami` with a 10s timeout.
+///
+/// `whoami` does NOT accept `--no-interactive`; passing it causes kiro-cli to
+/// emit an "unknown flag" error that looks like an auth failure. We use bare
+/// `whoami` and inspect the exit status.
+///
+/// Returns `(logged_in, first_stderr_line)` so callers can surface the real
+/// error to the user (Midway cookie expired, network failures, etc.) instead
+/// of a misleading "not logged in" message.
+async fn check_login(kiro_path: &PathBuf) -> (bool, Option<String>) {
     let result = tokio::time::timeout(
-        Duration::from_secs(5),
+        Duration::from_secs(10),
         tokio::process::Command::new(kiro_path)
-            .args(["whoami", "--no-interactive"])
+            .arg("whoami")
             .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status(),
+            .stderr(std::process::Stdio::piped())
+            .output(),
     )
     .await;
 
-    matches!(result, Ok(Ok(status)) if status.success())
+    match result {
+        Ok(Ok(output)) if output.status.success() => (true, None),
+        Ok(Ok(output)) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let first = stderr.lines().find(|l| !l.trim().is_empty()).map(|s| {
+                // Keep first stderr line short for display.
+                let trimmed = s.trim();
+                if trimmed.len() > 120 {
+                    format!("{}...", &trimmed[..120])
+                } else {
+                    trimmed.to_string()
+                }
+            });
+            (false, first)
+        }
+        Ok(Err(e)) => (false, Some(format!("spawn failed: {e}"))),
+        Err(_) => (false, Some("whoami timed out after 10s".to_string())),
+    }
 }
 
 /// Format the current time as `HH:MM:SS` for the AI pane header.
