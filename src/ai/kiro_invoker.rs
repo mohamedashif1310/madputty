@@ -61,24 +61,47 @@ impl KiroInvoker {
     }
 
     async fn invoke_inner(&self, prompt: &str, trust_all_tools: bool) -> Result<String, AiError> {
+        // kiro-cli invocation pattern:
+        //   kiro-cli chat --no-interactive [--trust-all-tools] "<prompt text>"
+        //
+        // For long prompts on Windows (>7KB to stay safely under 8191-char
+        // cmd.exe limit), we split: send a short instruction as the argv
+        // positional, and pipe the bulk of the context via stdin. This matches
+        // the documented kiro-cli pattern: "cat logs | kiro-cli chat --no-interactive 'Analyze'"
+        const WINDOWS_ARG_BUDGET: usize = 7000;
+        let split_via_stdin = cfg!(windows) && prompt.len() > WINDOWS_ARG_BUDGET;
+
+        let (argv_prompt, stdin_data): (String, Option<Vec<u8>>) = if split_via_stdin {
+            // Find a sensible split point — after the system prompt ends
+            // (marked by "\n\nLogs:\n") so we keep instructions as argv and
+            // push only the log bulk to stdin.
+            if let Some(idx) = prompt.find("\n\nLogs:\n") {
+                let (instructions, logs_section) = prompt.split_at(idx);
+                // logs_section starts with "\n\nLogs:\n" — strip it for stdin
+                let logs = logs_section.trim_start_matches("\n\nLogs:\n");
+                (
+                    format!("{instructions}\n\nLogs are provided on stdin."),
+                    Some(logs.as_bytes().to_vec()),
+                )
+            } else {
+                // No sensible split — just hard-truncate argv and send full via stdin
+                (
+                    "Analyze the context provided on stdin.".to_string(),
+                    Some(prompt.as_bytes().to_vec()),
+                )
+            }
+        } else {
+            (prompt.to_string(), None)
+        };
+
         let mut cmd = Command::new(&self.kiro_path);
         cmd.arg("chat").arg("--no-interactive");
         if trust_all_tools {
             cmd.arg("--trust-all-tools");
         }
-        // Pass prompt as the positional argument; long prompts are supported
-        // on Linux/macOS via the argv mechanism. On Windows we fall back to
-        // stdin below if the prompt exceeds a safe threshold.
-        let use_stdin = cfg!(windows) && prompt.len() > 4000;
-        if !use_stdin {
-            cmd.arg(prompt);
-        } else {
-            // When reading from stdin, we still need SOME positional arg
-            // on older kiro-cli versions; pass a marker that tells kiro to
-            // read from stdin. Newer versions accept "-" for stdin.
-            cmd.arg("-");
-        }
-        cmd.stdin(if use_stdin {
+        cmd.arg(&argv_prompt);
+
+        cmd.stdin(if stdin_data.is_some() {
             Stdio::piped()
         } else {
             Stdio::null()
@@ -89,12 +112,10 @@ impl KiroInvoker {
             .spawn()
             .map_err(|e| AiError::SpawnFailed(e.to_string()))?;
 
-        if use_stdin {
+        if let Some(bytes) = stdin_data {
             if let Some(mut stdin) = child.stdin.take() {
                 use tokio::io::AsyncWriteExt;
-                let prompt_bytes = prompt.as_bytes().to_vec();
-                // Write prompt and close stdin so kiro-cli knows the input ended.
-                let _ = stdin.write_all(&prompt_bytes).await;
+                let _ = stdin.write_all(&bytes).await;
                 let _ = stdin.shutdown().await;
                 drop(stdin);
             }
@@ -129,9 +150,11 @@ impl KiroInvoker {
                     Ok(String::from_utf8_lossy(&stdout_buf).to_string())
                 } else {
                     let stderr = String::from_utf8_lossy(&stderr_buf);
-                    let first_line = stderr.lines().next().unwrap_or("unknown error");
-                    // If the flag is unrecognized, retry once without it so
-                    // older kiro-cli versions still work.
+                    let first_line = stderr
+                        .lines()
+                        .find(|l| !l.trim().is_empty())
+                        .unwrap_or("kiro-cli exited non-zero");
+                    // If the flag is unrecognized, signal the caller to retry.
                     if trust_all_tools
                         && (stderr.contains("unexpected argument")
                             || stderr.contains("Found argument")
@@ -142,14 +165,13 @@ impl KiroInvoker {
                             "kiro-cli rejected --trust-all-tools; retrying without it. \
                              Consider upgrading kiro-cli to v1.26.0+."
                         );
-                        // Fall through to caller's retry via Box::pin to avoid recursion issues.
                         return Err(AiError::KiroError(
                             "RETRY_WITHOUT_TRUST_ALL_TOOLS".to_string(),
                         ));
                     }
-                    // Log stderr at debug level for troubleshooting without
-                    // leaking it to the UI (which has a sanitized message).
+                    // Full stderr at debug level for --verbose troubleshooting.
                     tracing::debug!("kiro-cli stderr: {}", stderr);
+                    // Surface the first useful line to the caller.
                     Err(AiError::KiroError(first_line.to_string()))
                 }
             }

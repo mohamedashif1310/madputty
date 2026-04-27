@@ -84,6 +84,19 @@ impl AiSubsystem {
             }
         }
 
+        // Headless mode (what we use via --no-interactive) requires an API key.
+        // Interactive browser login is NOT sufficient. Warn the user early
+        // so they know why AI responses won't arrive if the key is missing.
+        let has_api_key = std::env::var("KIRO_API_KEY")
+            .map(|v| !v.trim().is_empty())
+            .unwrap_or(false);
+        if logged_in && !has_api_key {
+            eprintln!(
+                "⚠ KIRO_API_KEY not set — kiro-cli --no-interactive needs an API key. \
+                 Generate one at https://app.kiro.dev/ and `set KIRO_API_KEY=<key>` before running."
+            );
+        }
+
         let invoker = KiroInvoker::new(path.clone(), timeout_seconds);
 
         Self {

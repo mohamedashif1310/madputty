@@ -118,16 +118,39 @@ During a session, press **Ctrl+A** (hold Ctrl, press A, release Ctrl), then pres
 
 ### Authentication requirements
 
-madputty uses `kiro-cli chat --no-interactive --trust-all-tools` under the hood. For this to work you need one of:
+madputty uses `kiro-cli chat --no-interactive` under the hood. Per the [Kiro CLI headless mode docs](https://kiro.dev/docs/cli/headless/), **headless mode requires `KIRO_API_KEY`** — interactive browser login alone is NOT enough.
 
-- **Interactive login** — run `kiro-cli login` (opens a browser or shows a device code). Your login state is shared with madputty. Verify with `kiro-cli whoami` or `madputty kiro-status`.
-- **API key** — set the `KIRO_API_KEY` environment variable to a Kiro Pro/Pro+/Power API key (required for CI/headless use).
+**Setup steps (Windows):**
 
-If you see "Midway authentication required" inside madputty but `kiro-cli` works fine in another terminal, check:
+```cmd
+REM 1. Install kiro-cli from https://kiro.dev/downloads
+REM 2. Generate an API key at https://app.kiro.dev/ (requires Kiro Pro / Pro+ / Power)
+REM 3. Set the environment variable in your current shell
+set KIRO_API_KEY=kir_xxxxxxxxxxxxxxxxxxxx
 
-1. Run `kiro-cli whoami` in the same shell as madputty. If that fails, the shell is missing your Midway cookie (re-login with `mwinit` on Amazon corporate machines, then `kiro-cli login`).
-2. Make sure you launched madputty from a shell that inherits your auth environment (don't launch via a clean `cmd` window or a new SSH session without `mwinit`).
-3. The `--ai-timeout-seconds` default (30s) may not be enough on slow corporate networks — try `--ai-timeout-seconds 60`.
+REM 4. Verify kiro-cli works headlessly
+kiro-cli chat --no-interactive "hello"
+
+REM 5. Run madputty in the same shell
+.\target\release\madputty.exe COM66 --baud 921600
+```
+
+**Linux / macOS:**
+
+```bash
+export KIRO_API_KEY=kir_xxxxxxxxxxxxxxxxxxxx
+kiro-cli chat --no-interactive "hello"   # verify first
+madputty /dev/ttyUSB0 --baud 921600
+```
+
+At startup, madputty warns if `KIRO_API_KEY` is missing. If you press Ctrl+A A and the AI pane shows an error like `kiro-cli error: You must be logged in` or similar, it means the API key is missing from the shell where you launched madputty.
+
+**Troubleshooting:**
+
+1. Test kiro-cli directly first: `kiro-cli chat --no-interactive "ping"`. If THAT fails, madputty can't help it — fix kiro-cli first.
+2. Set the env var in the SAME shell as madputty. Env vars are per-shell — setting it in another tab won't help.
+3. Slow corporate networks may exceed the 30s timeout. Try `--ai-timeout-seconds 60`.
+4. Run madputty with `--verbose 2> debug.log` and check debug.log for `kiro-cli stderr: ...` lines.
 
 ### How it works
 

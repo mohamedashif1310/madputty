@@ -526,18 +526,15 @@ async fn ai_consumer_loop(
                 }
             }
             Err(e) => {
-                // Sanitize error message before display — AiError::KiroError may
-                // contain unredacted stderr from kiro-cli.
-                let safe_msg = match &e {
-                    crate::ai::kiro_invoker::AiError::KiroError(_) => {
-                        "kiro-cli returned an error".to_string()
-                    }
-                    other => other.to_string(),
-                };
-                // Update pane state with error
+                // Show the REAL error in the pane so the user can act on it.
+                // kiro-cli error messages are what the user needs to see
+                // (e.g. "API key required", "not logged in", "timeout").
+                // Redaction already scrubbed the outgoing prompt, so
+                // stderr is only kiro-cli's own diagnostics — safe to show.
+                let display_msg = e.to_string();
                 {
                     let mut ps = pane_state.lock().unwrap();
-                    ps.set_error(safe_msg.clone());
+                    ps.set_error(display_msg.clone());
                 }
                 if let Some(ref sp) = split_pane {
                     if let Ok(r) = sp.lock() {
@@ -545,7 +542,7 @@ async fn ai_consumer_loop(
                         let _ = r.draw_ai_pane(&ps);
                     }
                 } else {
-                    eprintln!("\x1b[31;1m⚠ {safe_msg}\x1b[0m");
+                    eprintln!("\x1b[31;1m⚠ {display_msg}\x1b[0m");
                 }
             }
         }
