@@ -43,15 +43,20 @@ impl Colorizer {
         // Append bytes (lossy UTF-8 decoding preserves unknown bytes).
         self.buf.push_str(&String::from_utf8_lossy(bytes));
 
-        // Flush whole lines.
+        // Flush whole lines. Use explicit "\r\n" because crossterm's raw mode
+        // disables the terminal's automatic \n → \r\n translation on Windows.
+        // Without the explicit \r, each line after the first wraps to column
+        // N+1 of the next row (no carriage return), producing a blob of text
+        // that looks line-free.
         while let Some(idx) = self.buf.find('\n') {
             let line: String = self.buf.drain(..=idx).collect();
             let line_stripped = line.trim_end_matches(['\n', '\r']);
             let colored = colorize_line(line_stripped, &self.palette);
-            writeln!(out, "{}", colored)?;
+            write!(out, "{}\r\n", colored)?;
         }
 
         // Flush partial line if it's been idle for a bit (for prompts).
+        // No newline here — the partial is not yet terminated by the device.
         if !self.buf.is_empty()
             && self.last_write.elapsed() > Duration::from_millis(PARTIAL_FLUSH_MS)
         {
@@ -287,10 +292,39 @@ mod tests {
     #[test]
     fn crlf_line_endings_are_stripped() {
         let out = feed_and_collect(b"windows line\r\n", true);
-        // Content preserved, CR should be trimmed before coloring
+        // Content preserved, input CR should be trimmed before coloring
         assert!(out.contains("windows line"));
-        // The emitted output ends each line with \n only
-        assert!(out.ends_with('\n'));
+        // Output uses explicit CRLF for Windows raw mode compatibility
+        assert!(out.ends_with("\r\n"));
+    }
+
+    #[test]
+    fn multiple_lines_each_terminated_with_crlf() {
+        // Regression test: without explicit \r\n, lines ran together on
+        // Windows raw-mode terminals producing one giant blob of text.
+        let out = feed_and_collect(b"line1\nline2\nline3\n", true);
+        // Count number of CRLFs — should be exactly 3
+        let crlf_count = out.matches("\r\n").count();
+        assert_eq!(crlf_count, 3, "expected 3 CRLFs, got output: {:?}", out);
+    }
+
+    #[test]
+    fn high_rate_stream_preserves_line_separation() {
+        // Simulate a 4KB chunk with many complete lines arriving at once
+        // (mirrors the port_reader behavior at 921600 baud).
+        let mut input = String::new();
+        for i in 0..100 {
+            input.push_str(&format!("log entry {i}\r\n"));
+        }
+        let out = feed_and_collect(input.as_bytes(), true);
+        let crlf_count = out.matches("\r\n").count();
+        assert_eq!(
+            crlf_count, 100,
+            "all 100 lines must be individually terminated"
+        );
+        // First and last entries present
+        assert!(out.contains("log entry 0"));
+        assert!(out.contains("log entry 99"));
     }
 
     #[test]
