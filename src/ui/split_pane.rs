@@ -107,18 +107,34 @@ impl SplitPaneRenderer {
             return Ok(());
         }
         let mut stdout = io::stdout().lock();
-        // Scroll region from row 1 to `log_region_height`. The status bar row
-        // (and the AI pane rows, if any) are outside this region so they don't
-        // scroll when logs arrive.
-        write!(stdout, "\x1b[1;{}r", self.log_region_height)?;
-        // Move cursor to top-left of scroll region so logs start at the top.
-        write!(stdout, "\x1b[1;1H")?;
-        stdout.flush()?;
 
+        // 1. Clear the entire screen — removes the banner from the terminal
+        //    so logs don't start below it and the AI pane has clean real estate.
+        write!(stdout, "\x1b[2J\x1b[H")?;
+
+        // 2. Set scroll region from row 1 to `log_region_height`. The AI pane
+        //    rows and status bar row sit outside this region and don't scroll.
+        write!(stdout, "\x1b[1;{}r", self.log_region_height)?;
+
+        // 3. Move cursor to top-left of the scroll region.
+        write!(stdout, "\x1b[1;1H")?;
+
+        // 4. In split-pane mode, draw a visible separator and pre-fill the
+        //    AI pane rows with the "waiting" header so the user knows AI
+        //    is ready from second zero.
         if self.mode == Mode::SplitPane {
             self.draw_separator(&mut stdout)?;
+            // Placeholder header — overwritten by draw_ai_pane() when state changes.
+            let content_start = self.ai_pane_top_row + 1;
+            write!(
+                stdout,
+                "\x1b[{content_start};1H\x1b[2K\x1b[33;1m🤖 AI Analysis\x1b[0m  \x1b[2m(press Ctrl+A A to analyze recent logs)\x1b[0m"
+            )?;
+            // Return cursor to the top of the log scroll region.
+            write!(stdout, "\x1b[1;1H")?;
         }
-        Ok(())
+
+        stdout.flush()
     }
 
     /// Write log bytes inside the scroll region. Terminal handles scrolling.
@@ -245,7 +261,17 @@ impl SplitPaneRenderer {
 
     fn draw_separator(&self, stdout: &mut impl Write) -> io::Result<()> {
         let sep_row = self.ai_pane_top_row;
-        let line = "─".repeat(self.term_width as usize);
+        let label = " 🤖 AI ANALYSIS ";
+        let label_len = 16; // visual width of the label above (emoji counts as 2)
+        let total = self.term_width as usize;
+        let left_pad = 2;
+        let dashes_right = total.saturating_sub(left_pad + label_len);
+        let line = format!(
+            "{left}\x1b[43;30;1m{lbl}\x1b[0m\x1b[33m{right}\x1b[0m",
+            left = "─".repeat(left_pad),
+            lbl = label,
+            right = "─".repeat(dashes_right),
+        );
         write!(stdout, "\x1b[{sep_row};1H\x1b[33m{line}\x1b[0m")?;
         stdout.flush()
     }
