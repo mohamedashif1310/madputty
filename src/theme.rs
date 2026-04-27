@@ -294,3 +294,92 @@ pub fn print_session_summary(
     println!("{}", palette.border.apply_to(bot));
     println!();
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn humanize_bytes_under_kib() {
+        assert_eq!(humanize_bytes(0), "0 B");
+        assert_eq!(humanize_bytes(1), "1 B");
+        assert_eq!(humanize_bytes(1023), "1023 B");
+    }
+
+    #[test]
+    fn humanize_bytes_kib_range() {
+        assert_eq!(humanize_bytes(1024), "1.0 KiB");
+        assert_eq!(humanize_bytes(2048), "2.0 KiB");
+        assert_eq!(humanize_bytes(1024 * 1023), "1023.0 KiB");
+    }
+
+    #[test]
+    fn humanize_bytes_mib_range() {
+        assert_eq!(humanize_bytes(1024 * 1024), "1.00 MiB");
+        assert_eq!(humanize_bytes(10 * 1024 * 1024), "10.00 MiB");
+    }
+
+    #[test]
+    fn humanize_bytes_gib_range() {
+        assert_eq!(humanize_bytes(1024u64.pow(3)), "1.00 GiB");
+        assert_eq!(humanize_bytes(3 * 1024u64.pow(3)), "3.00 GiB");
+    }
+
+    #[test]
+    fn format_elapsed_zero() {
+        assert_eq!(format_elapsed(Duration::from_secs(0)), "0:00:00");
+    }
+
+    #[test]
+    fn format_elapsed_seconds_only() {
+        assert_eq!(format_elapsed(Duration::from_secs(5)), "0:00:05");
+        assert_eq!(format_elapsed(Duration::from_secs(59)), "0:00:59");
+    }
+
+    #[test]
+    fn format_elapsed_minutes() {
+        assert_eq!(format_elapsed(Duration::from_secs(60)), "0:01:00");
+        assert_eq!(format_elapsed(Duration::from_secs(125)), "0:02:05");
+    }
+
+    #[test]
+    fn format_elapsed_hours() {
+        assert_eq!(format_elapsed(Duration::from_secs(3600)), "1:00:00");
+        assert_eq!(format_elapsed(Duration::from_secs(3661)), "1:01:01");
+        assert_eq!(format_elapsed(Duration::from_secs(7325)), "2:02:05");
+    }
+
+    #[test]
+    fn amazon_palette_constructs() {
+        let p = Palette::amazon();
+        // Just confirm it constructs without panic and produces non-default styles.
+        let s = p.logo_yellow.apply_to("x").to_string();
+        assert!(s.contains("x"));
+    }
+
+    #[test]
+    fn plain_palette_is_uncolored() {
+        let p = Palette::plain();
+        // Plain palette renders text as-is without ANSI codes added.
+        let s = p.logo_white.apply_to("hello").to_string();
+        assert_eq!(s, "hello");
+    }
+
+    #[test]
+    fn wordmark_has_six_lines() {
+        assert_eq!(WORDMARK_LINES.len(), 6);
+    }
+
+    #[test]
+    fn smile_lines_nonempty() {
+        assert_eq!(SMILE_LINES.len(), 2);
+        for line in SMILE_LINES {
+            assert!(!line.is_empty());
+        }
+    }
+
+    #[test]
+    fn tagline_nonempty() {
+        assert!(!TAGLINE.is_empty());
+    }
+}

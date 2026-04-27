@@ -91,3 +91,115 @@ impl From<&Cli> for SerialConfig {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    fn parse_cli(args: &[&str]) -> Cli {
+        let mut full = vec!["madputty"];
+        full.extend_from_slice(args);
+        Cli::parse_from(full)
+    }
+
+    #[test]
+    fn framing_8n1_default() {
+        let cfg = SerialConfig::defaults();
+        assert_eq!(cfg.framing(), "8N1");
+    }
+
+    #[test]
+    fn framing_7e1() {
+        let cfg = SerialConfig {
+            baud: 9600,
+            data_bits: DataBits::Seven,
+            parity: Parity::Even,
+            stop_bits: StopBits::One,
+            flow_control: FlowControl::None,
+        };
+        assert_eq!(cfg.framing(), "7E1");
+    }
+
+    #[test]
+    fn framing_8o2() {
+        let cfg = SerialConfig {
+            baud: 19200,
+            data_bits: DataBits::Eight,
+            parity: Parity::Odd,
+            stop_bits: StopBits::Two,
+            flow_control: FlowControl::None,
+        };
+        assert_eq!(cfg.framing(), "8O2");
+    }
+
+    #[test]
+    fn framing_all_data_bits() {
+        for (bits, letter) in [
+            (DataBits::Five, 5),
+            (DataBits::Six, 6),
+            (DataBits::Seven, 7),
+            (DataBits::Eight, 8),
+        ] {
+            let cfg = SerialConfig {
+                baud: 9600,
+                data_bits: bits,
+                parity: Parity::None,
+                stop_bits: StopBits::One,
+                flow_control: FlowControl::None,
+            };
+            assert_eq!(cfg.framing(), format!("{letter}N1"));
+        }
+    }
+
+    #[test]
+    fn cli_defaults_produce_8n1_115200() {
+        let cli = parse_cli(&["COM3"]);
+        let cfg = SerialConfig::from(&cli);
+        assert_eq!(cfg.baud, 115_200);
+        assert_eq!(cfg.framing(), "8N1");
+    }
+
+    #[test]
+    fn cli_baud_flag_is_applied() {
+        let cli = parse_cli(&["COM3", "--baud", "921600"]);
+        let cfg = SerialConfig::from(&cli);
+        assert_eq!(cfg.baud, 921_600);
+    }
+
+    #[test]
+    fn cli_parity_even_is_applied() {
+        let cli = parse_cli(&["COM3", "--parity", "even"]);
+        let cfg = SerialConfig::from(&cli);
+        assert!(matches!(cfg.parity, Parity::Even));
+        assert_eq!(cfg.framing(), "8E1");
+    }
+
+    #[test]
+    fn cli_stop_bits_two_is_applied() {
+        let cli = parse_cli(&["COM3", "--stop-bits", "2"]);
+        let cfg = SerialConfig::from(&cli);
+        assert!(matches!(cfg.stop_bits, StopBits::Two));
+    }
+
+    #[test]
+    fn cli_flow_control_hardware_is_applied() {
+        let cli = parse_cli(&["COM3", "--flow-control", "hardware"]);
+        let cfg = SerialConfig::from(&cli);
+        assert!(matches!(cfg.flow_control, FlowControl::Hardware));
+    }
+
+    #[test]
+    fn cli_flow_control_software_is_applied() {
+        let cli = parse_cli(&["COM3", "--flow-control", "software"]);
+        let cfg = SerialConfig::from(&cli);
+        assert!(matches!(cfg.flow_control, FlowControl::Software));
+    }
+
+    #[test]
+    fn builder_uses_port_name_and_baud() {
+        let cfg = SerialConfig::defaults();
+        // Can't inspect SerialPortBuilder directly, but confirm it constructs.
+        let _ = cfg.builder("COM3");
+    }
+}

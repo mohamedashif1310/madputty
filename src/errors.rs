@@ -60,3 +60,87 @@ impl MadPuttyError {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io;
+
+    #[test]
+    fn port_not_found_maps_to_exit_code_2() {
+        let err = MadPuttyError::PortNotFound {
+            port: "COM99".to_string(),
+        };
+        assert_eq!(err.exit_code(), ExitCode::NotFound);
+        assert_eq!(err.exit_code() as i32, 2);
+    }
+
+    #[test]
+    fn port_busy_maps_to_exit_code_3() {
+        let err = MadPuttyError::PortBusy {
+            port: "COM3".to_string(),
+        };
+        assert_eq!(err.exit_code(), ExitCode::Busy);
+        assert_eq!(err.exit_code() as i32, 3);
+    }
+
+    #[test]
+    fn port_io_maps_to_exit_code_1() {
+        let err = MadPuttyError::PortIo(io::Error::other("boom"));
+        assert_eq!(err.exit_code(), ExitCode::General);
+        assert_eq!(err.exit_code() as i32, 1);
+    }
+
+    #[test]
+    fn log_file_maps_to_general() {
+        let err = MadPuttyError::LogFile {
+            path: "/tmp/x.log".to_string(),
+            source: io::Error::new(io::ErrorKind::PermissionDenied, "denied"),
+        };
+        assert_eq!(err.exit_code(), ExitCode::General);
+    }
+
+    #[test]
+    fn send_file_maps_to_general() {
+        let err = MadPuttyError::SendFile {
+            path: "/tmp/x.bin".to_string(),
+            source: io::Error::new(io::ErrorKind::NotFound, "nope"),
+        };
+        assert_eq!(err.exit_code(), ExitCode::General);
+    }
+
+    #[test]
+    fn invalid_arg_maps_to_general() {
+        let err = MadPuttyError::InvalidArg("bad baud".to_string());
+        assert_eq!(err.exit_code(), ExitCode::General);
+    }
+
+    #[test]
+    fn ai_error_maps_to_general() {
+        let err = MadPuttyError::AiError("kiro timeout".to_string());
+        assert_eq!(err.exit_code(), ExitCode::General);
+    }
+
+    #[test]
+    fn success_is_zero() {
+        assert_eq!(ExitCode::Success as i32, 0);
+    }
+
+    #[test]
+    fn display_contains_port_name() {
+        let err = MadPuttyError::PortNotFound {
+            port: "/dev/ttyUSB0".to_string(),
+        };
+        assert!(err.to_string().contains("/dev/ttyUSB0"));
+    }
+
+    #[test]
+    fn display_contains_busy_context() {
+        let err = MadPuttyError::PortBusy {
+            port: "COM3".to_string(),
+        };
+        let s = err.to_string();
+        assert!(s.contains("COM3"));
+        assert!(s.to_lowercase().contains("use") || s.to_lowercase().contains("busy"));
+    }
+}

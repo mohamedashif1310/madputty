@@ -72,3 +72,100 @@ impl Default for AiPaneState {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_state_is_empty() {
+        let p = AiPaneState::new();
+        assert!(p.header_time.is_none());
+        assert!(p.body.is_empty());
+        assert!(!p.spinner_active);
+        assert!(p.error.is_none());
+        assert!(!p.modal_open);
+        assert_eq!(p.modal_scroll_offset, 0);
+        assert!(!p.has_response());
+    }
+
+    #[test]
+    fn set_response_populates_body_and_clears_spinner() {
+        let mut p = AiPaneState::new();
+        p.set_spinner(true);
+        p.set_response("hello".to_string(), "12:34:56".to_string());
+        assert_eq!(p.body, "hello");
+        assert_eq!(p.header_time.as_deref(), Some("12:34:56"));
+        assert!(!p.spinner_active);
+        assert!(p.error.is_none());
+        assert!(p.has_response());
+    }
+
+    #[test]
+    fn set_response_clears_previous_error() {
+        let mut p = AiPaneState::new();
+        p.set_error("old error".to_string());
+        p.set_response("new".to_string(), "00:00:00".to_string());
+        assert!(p.error.is_none());
+    }
+
+    #[test]
+    fn set_error_clears_spinner() {
+        let mut p = AiPaneState::new();
+        p.set_spinner(true);
+        p.set_error("oops".to_string());
+        assert!(!p.spinner_active);
+        assert_eq!(p.error.as_deref(), Some("oops"));
+    }
+
+    #[test]
+    fn set_spinner_toggles() {
+        let mut p = AiPaneState::new();
+        p.set_spinner(true);
+        assert!(p.spinner_active);
+        p.set_spinner(false);
+        assert!(!p.spinner_active);
+    }
+
+    #[test]
+    fn modal_open_close() {
+        let mut p = AiPaneState::new();
+        p.open_modal();
+        assert!(p.modal_open);
+        assert_eq!(p.modal_scroll_offset, 0);
+        p.close_modal();
+        assert!(!p.modal_open);
+    }
+
+    #[test]
+    fn scroll_modal_increments_and_bounds_to_zero() {
+        let mut p = AiPaneState::new();
+        p.scroll_modal(3);
+        assert_eq!(p.modal_scroll_offset, 3);
+        p.scroll_modal(-2);
+        assert_eq!(p.modal_scroll_offset, 1);
+        // Scrolling below zero clamps to zero
+        p.scroll_modal(-10);
+        assert_eq!(p.modal_scroll_offset, 0);
+    }
+
+    #[test]
+    fn has_response_false_when_empty() {
+        let p = AiPaneState::new();
+        assert!(!p.has_response());
+    }
+
+    #[test]
+    fn has_response_true_after_set() {
+        let mut p = AiPaneState::new();
+        p.set_response("x".to_string(), "t".to_string());
+        assert!(p.has_response());
+    }
+
+    #[test]
+    fn default_is_same_as_new() {
+        let p = AiPaneState::default();
+        assert!(!p.has_response());
+        assert!(p.header_time.is_none());
+    }
+}

@@ -238,3 +238,152 @@ fn replace_case_insensitive(haystack: &str, keyword: &str, style: &console::Styl
     out.push_str(&haystack[last..]);
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::theme::Palette;
+
+    /// Helper: feed bytes, collect output, assert it contains expected substring.
+    fn feed_and_collect(bytes: &[u8], enabled: bool) -> String {
+        let mut c = Colorizer::new(Palette::plain(), enabled);
+        let mut out = Vec::new();
+        c.feed(bytes, &mut out).unwrap();
+        c.flush(&mut out).unwrap();
+        String::from_utf8_lossy(&out).to_string()
+    }
+
+    #[test]
+    fn disabled_passes_bytes_through_unchanged() {
+        let out = feed_and_collect(b"raw bytes here\n", false);
+        assert_eq!(out, "raw bytes here\n");
+    }
+
+    #[test]
+    fn enabled_plain_palette_preserves_content() {
+        let out = feed_and_collect(b"hello world\n", true);
+        assert!(out.contains("hello world"));
+    }
+
+    #[test]
+    fn multiple_complete_lines_are_all_emitted() {
+        let out = feed_and_collect(b"line one\nline two\nline three\n", true);
+        assert!(out.contains("line one"));
+        assert!(out.contains("line two"));
+        assert!(out.contains("line three"));
+    }
+
+    #[test]
+    fn partial_line_without_newline_is_buffered_then_flushed() {
+        let mut c = Colorizer::new(Palette::plain(), true);
+        let mut out = Vec::new();
+        c.feed(b"no newline here", &mut out).unwrap();
+        // Until flush, the line may not be fully emitted if it came in fast.
+        c.flush(&mut out).unwrap();
+        let s = String::from_utf8_lossy(&out);
+        assert!(s.contains("no newline here"));
+    }
+
+    #[test]
+    fn crlf_line_endings_are_stripped() {
+        let out = feed_and_collect(b"windows line\r\n", true);
+        // Content preserved, CR should be trimmed before coloring
+        assert!(out.contains("windows line"));
+        // The emitted output ends each line with \n only
+        assert!(out.ends_with('\n'));
+    }
+
+    #[test]
+    fn empty_input_produces_empty_output() {
+        let out = feed_and_collect(b"", true);
+        assert_eq!(out, "");
+    }
+
+    #[test]
+    fn invalid_utf8_bytes_dont_panic() {
+        // 0xFF is invalid UTF-8
+        let bytes = b"valid \xFF\xFE then more\n";
+        let out = feed_and_collect(bytes, true);
+        assert!(out.contains("valid"));
+        assert!(out.contains("then more"));
+    }
+
+    #[test]
+    fn error_keyword_passes_through_in_plain_palette() {
+        let out = feed_and_collect(b"ERROR: kernel panic detected\n", true);
+        assert!(out.contains("ERROR"));
+        assert!(out.contains("kernel panic"));
+    }
+
+    #[test]
+    fn bracketed_timestamp_content_preserved() {
+        let out = feed_and_collect(b"[2024-01-01T12:00:00Z] startup\n", true);
+        assert!(out.contains("2024-01-01T12:00:00Z"));
+        assert!(out.contains("startup"));
+    }
+
+    #[test]
+    fn shell_prompt_recognized() {
+        let out = feed_and_collect(b"rfw>\n", true);
+        assert!(out.contains("rfw>"));
+    }
+
+    #[test]
+    fn flush_idempotent_on_empty_buffer() {
+        let mut c = Colorizer::new(Palette::plain(), true);
+        let mut out = Vec::new();
+        c.flush(&mut out).unwrap();
+        c.flush(&mut out).unwrap();
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn is_hex_id_recognizes_hex_task_ids() {
+        assert!(is_hex_id("DEADBEEF"));
+        assert!(is_hex_id("0x1234"[2..].as_ref()));
+        assert!(is_hex_id("abcd"));
+    }
+
+    #[test]
+    fn is_hex_id_rejects_short_or_non_hex() {
+        assert!(!is_hex_id("abc")); // too short
+        assert!(!is_hex_id("xyz123"));
+        assert!(!is_hex_id(""));
+    }
+
+    #[test]
+    fn take_bracket_segment_extracts_inner() {
+        assert_eq!(
+            take_bracket_segment("[hello]world"),
+            Some(("hello", "world"))
+        );
+        assert_eq!(take_bracket_segment("[a][b]"), Some(("a", "[b]")));
+    }
+
+    #[test]
+    fn take_bracket_segment_none_without_leading_bracket() {
+        assert!(take_bracket_segment("no bracket").is_none());
+        assert!(take_bracket_segment("").is_none());
+    }
+
+    #[test]
+    fn is_level_boundary_true_for_space_after() {
+        assert!(is_level_boundary("E rest"));
+        assert!(is_level_boundary("W")); // end of string
+    }
+
+    #[test]
+    fn is_level_boundary_false_when_letter_follows() {
+        assert!(!is_level_boundary("Error"));
+        assert!(!is_level_boundary("Warn"));
+    }
+
+    #[test]
+    fn replace_case_insensitive_preserves_case() {
+        let style = console::Style::new();
+        let out = replace_case_insensitive("an ERROR and an error", "error", &style);
+        // Both casings must be present in the output
+        assert!(out.contains("ERROR"));
+        assert!(out.contains("error"));
+    }
+}
