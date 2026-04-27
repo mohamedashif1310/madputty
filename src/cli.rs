@@ -68,6 +68,12 @@ pub struct Cli {
     #[arg(long)]
     pub no_ai: bool,
 
+    /// Use split-pane UI for AI output (top ~80% log, bottom ~20% AI).
+    /// This disables terminal scrollback for the log region — without it,
+    /// AI responses appear inline and your terminal's scrollback works.
+    #[arg(long)]
+    pub split_pane: bool,
+
     /// Enable debug-level tracing on stderr.
     #[arg(long, global = true)]
     pub verbose: bool,

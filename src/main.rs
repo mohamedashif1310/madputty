@@ -84,6 +84,7 @@ async fn dispatch(cli: Cli) -> Result<(), MadPuttyError> {
         ai_timeout_seconds: cli.ai_timeout_seconds,
         no_redact: cli.no_redact,
         no_ai: cli.no_ai,
+        split_pane: cli.split_pane,
     };
 
     session::run(&port_name, config, opts).await

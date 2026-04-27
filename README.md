@@ -90,6 +90,14 @@ madputty kiro-status
 | `--ai-timeout-seconds` | `30` | Timeout for each AI call |
 | `--no-redact` | off | Disable credential redaction (with warning) |
 | `--no-ai` | off | Force AI off even if kiro-cli is installed |
+| `--split-pane` | off | Enable split-pane UI (top log / bottom AI). Note: disables terminal scrollback while active. |
+
+### Scrollback behavior
+
+By default, madputty writes logs inline and preserves your terminal's native scrollback — just scroll up with your mouse or PgUp as usual. AI responses appear inline between log lines.
+
+If you prefer a fixed AI pane at the bottom (like tmux), pass `--split-pane`. The trade-off: while active, you can't scroll back through log history because the terminal's scroll region is locked to the log area. For both worlds, use `--log session.log` to capture everything to a file you can `less` through later.
+
 
 ### Authentication requirements
 

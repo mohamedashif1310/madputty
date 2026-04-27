@@ -39,6 +39,7 @@ pub struct SessionOptions {
     pub ai_timeout_seconds: u32,
     pub no_redact: bool,
     pub no_ai: bool,
+    pub split_pane: bool,
 }
 
 struct RawModeGuard;
@@ -180,19 +181,22 @@ pub async fn run(
     );
     let response_log = crate::ai::response_log::ResponseLog::new(&session_id);
 
-    // Split-pane renderer (only when AI is enabled and not plain mode)
-    let split_pane: Option<Arc<Mutex<SplitPaneRenderer>>> = if ai_enabled && !opts.plain {
-        let (w, h) = crossterm::terminal::size().unwrap_or((80, 24));
-        let renderer = SplitPaneRenderer::new(w, h);
-        if renderer.active {
-            let _ = renderer.setup();
-            Some(Arc::new(Mutex::new(renderer)))
+    // Split-pane renderer (only when AI is enabled AND user opted in with
+    // --split-pane AND we're not in plain mode). Split-pane uses ANSI scroll
+    // regions which disables terminal scrollback, so it's opt-in.
+    let split_pane: Option<Arc<Mutex<SplitPaneRenderer>>> =
+        if ai_enabled && !opts.plain && opts.split_pane {
+            let (w, h) = crossterm::terminal::size().unwrap_or((80, 24));
+            let renderer = SplitPaneRenderer::new(w, h);
+            if renderer.active {
+                let _ = renderer.setup();
+                Some(Arc::new(Mutex::new(renderer)))
+            } else {
+                None
+            }
         } else {
             None
-        }
-    } else {
-        None
-    };
+        };
 
     // AI pane state (shared between consumer and renderer)
     let ai_pane_state: Arc<Mutex<AiPaneState>> = Arc::new(Mutex::new(AiPaneState::new()));
@@ -460,8 +464,9 @@ async fn ai_consumer_loop(
             ),
         };
 
-        // Invoke kiro-cli
-        match invoker.invoke(&prompt).await {
+        // Invoke kiro-cli (with automatic retry for older versions without
+        // --trust-all-tools support)
+        match invoker.invoke_with_fallback(&prompt).await {
             Ok(response) => {
                 // Update pane state
                 let now = format_time_now();
