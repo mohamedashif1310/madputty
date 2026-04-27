@@ -181,22 +181,33 @@ pub async fn run(
     );
     let response_log = crate::ai::response_log::ResponseLog::new(&session_id);
 
-    // Split-pane renderer (only when AI is enabled AND user opted in with
-    // --split-pane AND we're not in plain mode). Split-pane uses ANSI scroll
-    // regions which disables terminal scrollback, so it's opt-in.
-    let split_pane: Option<Arc<Mutex<SplitPaneRenderer>>> =
-        if ai_enabled && !opts.plain && opts.split_pane {
-            let (w, h) = crossterm::terminal::size().unwrap_or((80, 24));
-            let renderer = SplitPaneRenderer::new(w, h);
-            if renderer.active {
-                let _ = renderer.setup();
-                Some(Arc::new(Mutex::new(renderer)))
-            } else {
-                None
-            }
+    // Renderer selection (from least to most intrusive):
+    //   plain mode         → no renderer (raw writes, no status bar)
+    //   --split-pane + AI  → full split: log + AI pane + status (no scrollback)
+    //   default            → status-bar-only: pinned status, scrollback works
+    let split_pane: Option<Arc<Mutex<SplitPaneRenderer>>> = if opts.plain {
+        None
+    } else if opts.split_pane && ai_enabled {
+        let (w, h) = crossterm::terminal::size().unwrap_or((80, 24));
+        let renderer = SplitPaneRenderer::new(w, h);
+        if renderer.active {
+            let _ = renderer.setup();
+            Some(Arc::new(Mutex::new(renderer)))
         } else {
             None
-        };
+        }
+    } else {
+        // Pin status bar at the last row; logs scroll in rows 1..N-1.
+        // Terminal's native scrollback still works for the log region.
+        let (w, h) = crossterm::terminal::size().unwrap_or((80, 24));
+        let renderer = SplitPaneRenderer::status_bar_only(w, h);
+        if renderer.active {
+            let _ = renderer.setup();
+            Some(Arc::new(Mutex::new(renderer)))
+        } else {
+            None
+        }
+    };
 
     // AI pane state (shared between consumer and renderer)
     let ai_pane_state: Arc<Mutex<AiPaneState>> = Arc::new(Mutex::new(AiPaneState::new()));
@@ -721,11 +732,14 @@ fn input_forwarder_loop(
                 break;
             }
             HotkeyAction::Analyze => {
+                // Print a visible acknowledgment so user knows the hotkey fired.
+                eprintln!("\x1b[33;1m[AI] Analyzing recent logs...\x1b[0m");
                 let _ = tx_ai.blocking_send(AiTrigger::Analyze);
             }
             HotkeyAction::AskQuestion => {
-                // For now, trigger a default analysis (full question prompt requires
-                // inline input which needs a text input widget — deferred)
+                // Custom question input requires a text input widget (deferred).
+                // For now this acts the same as Analyze.
+                eprintln!("\x1b[33;1m[AI] Analyzing (custom questions not yet wired)...\x1b[0m");
                 let _ = tx_ai.blocking_send(AiTrigger::Analyze);
             }
             HotkeyAction::ShowLastResponse => {

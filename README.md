@@ -94,9 +94,20 @@ madputty kiro-status
 
 ### Scrollback behavior
 
-By default, madputty writes logs inline and preserves your terminal's native scrollback — just scroll up with your mouse or PgUp as usual. AI responses appear inline between log lines.
+By default, madputty **pins the status bar** to the last row of your terminal and lets logs scroll normally in the region above it. Your terminal's native scrollback still works — scroll up with your mouse or PgUp to see earlier log lines.
 
-If you prefer a fixed AI pane at the bottom (like tmux), pass `--split-pane`. The trade-off: while active, you can't scroll back through log history because the terminal's scroll region is locked to the log area. For both worlds, use `--log session.log` to capture everything to a file you can `less` through later.
+AI responses appear inline between log lines (look for the `─── 🤖 AI Analysis ───` separator).
+
+If you prefer a fixed AI pane at the bottom (tmux-style), pass `--split-pane`. The trade-off: while active, terminal scrollback is disabled for the log region. For both worlds, use `--log session.log` to capture everything to a file you can `less` through later.
+
+### Triggering AI analysis
+
+During a session, press **Ctrl+A** (hold Ctrl, press A, release Ctrl), then press **A** again. You'll see `[AI] Analyzing recent logs...` inline, then the response a few seconds later. If nothing happens:
+
+- Check that `kiro-cli whoami` works in the same shell (not just another tab)
+- Run with `--verbose 2> debug.log` and check `debug.log` for `kiro-cli stderr: ...` messages
+- Try `--ai-timeout-seconds 60` on slow networks
+
 
 
 ### Authentication requirements
