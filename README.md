@@ -90,15 +90,21 @@ madputty kiro-status
 | `--ai-timeout-seconds` | `30` | Timeout for each AI call |
 | `--no-redact` | off | Disable credential redaction (with warning) |
 | `--no-ai` | off | Force AI off even if kiro-cli is installed |
-| `--split-pane` | off | Enable split-pane UI (top log / bottom AI). Note: disables terminal scrollback while active. |
+| `--no-split-pane` | off | Disable the split-pane AI layout (falls back to pinned status bar only). AI hotkeys still work; responses render inline. |
 
 ### Scrollback behavior
 
-By default, madputty **pins the status bar** to the last row of your terminal and lets logs scroll normally in the region above it. Your terminal's native scrollback still works — scroll up with your mouse or PgUp to see earlier log lines.
+By default, when `kiro-cli` is installed and you're logged in, madputty shows a **static three-region layout**:
 
-AI responses appear inline between log lines (look for the `─── 🤖 AI Analysis ───` separator).
+- Top ~80%: live log stream (scrollable inside the region)
+- Bottom ~20%: **pinned AI analysis pane** showing the latest AI response
+- Last row: pinned status bar with port / baud / rate
 
-If you prefer a fixed AI pane at the bottom (tmux-style), pass `--split-pane`. The trade-off: while active, terminal scrollback is disabled for the log region. For both worlds, use `--log session.log` to capture everything to a file you can `less` through later.
+AI responses appear in the bottom pane automatically; press **Ctrl+A A** to trigger analysis of recent logs. The AI pane is always visible so you know it's ready.
+
+If you don't want the split-pane layout (e.g. you want maximum terminal scrollback or you prefer inline AI output), pass `--no-split-pane`. The AI subsystem still works via hotkeys; responses just render between log lines instead of in a fixed pane.
+
+When `kiro-cli` is not installed or not logged in, madputty automatically falls back to a pinned-status-bar layout (no AI pane).
 
 ### Triggering AI analysis
 

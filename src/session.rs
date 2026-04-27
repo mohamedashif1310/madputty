@@ -39,7 +39,7 @@ pub struct SessionOptions {
     pub ai_timeout_seconds: u32,
     pub no_redact: bool,
     pub no_ai: bool,
-    pub split_pane: bool,
+    pub no_split_pane: bool,
 }
 
 struct RawModeGuard;
@@ -181,24 +181,30 @@ pub async fn run(
     );
     let response_log = crate::ai::response_log::ResponseLog::new(&session_id);
 
-    // Renderer selection (from least to most intrusive):
-    //   plain mode         → no renderer (raw writes, no status bar)
-    //   --split-pane + AI  → full split: log + AI pane + status (no scrollback)
-    //   default            → status-bar-only: pinned status, scrollback works
+    // Renderer selection (restored to the original design):
+    //   plain mode           → no renderer (raw writes, no status bar)
+    //   AI enabled (default) → full split: log + static AI pane + status bar
+    //   AI disabled / --no-split-pane → status-bar-only: pinned status, scrollback
     let split_pane: Option<Arc<Mutex<SplitPaneRenderer>>> = if opts.plain {
         None
-    } else if opts.split_pane && ai_enabled {
+    } else if ai_enabled && !opts.no_split_pane {
         let (w, h) = crossterm::terminal::size().unwrap_or((80, 24));
         let renderer = SplitPaneRenderer::new(w, h);
         if renderer.active {
             let _ = renderer.setup();
             Some(Arc::new(Mutex::new(renderer)))
         } else {
-            None
+            // Terminal too small for split — fall back to status-bar-only.
+            let renderer = SplitPaneRenderer::status_bar_only(w, h);
+            if renderer.active {
+                let _ = renderer.setup();
+                Some(Arc::new(Mutex::new(renderer)))
+            } else {
+                None
+            }
         }
     } else {
-        // Pin status bar at the last row; logs scroll in rows 1..N-1.
-        // Terminal's native scrollback still works for the log region.
+        // AI unavailable, or user passed --no-split-pane — pin status only.
         let (w, h) = crossterm::terminal::size().unwrap_or((80, 24));
         let renderer = SplitPaneRenderer::status_bar_only(w, h);
         if renderer.active {
@@ -211,6 +217,15 @@ pub async fn run(
 
     // AI pane state (shared between consumer and renderer)
     let ai_pane_state: Arc<Mutex<AiPaneState>> = Arc::new(Mutex::new(AiPaneState::new()));
+
+    // Draw the initial AI pane immediately so the user sees the pinned
+    // "press Ctrl+A A to run" hint from second zero.
+    if let Some(ref sp) = split_pane {
+        if let Ok(r) = sp.lock() {
+            let ps = ai_pane_state.lock().unwrap();
+            let _ = r.draw_ai_pane(&ps);
+        }
+    }
 
     // Spawn Port_Reader
     let shutdown_reader = shutdown.clone();

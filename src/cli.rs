@@ -68,11 +68,11 @@ pub struct Cli {
     #[arg(long)]
     pub no_ai: bool,
 
-    /// Use split-pane UI for AI output (top ~80% log, bottom ~20% AI).
-    /// This disables terminal scrollback for the log region — without it,
-    /// AI responses appear inline and your terminal's scrollback works.
+    /// Disable the split-pane AI layout (falls back to pinned status bar only).
+    /// Use when you need maximum terminal scrollback and don't want the static
+    /// AI pane. The AI subsystem still works via hotkeys — just renders inline.
     #[arg(long)]
-    pub split_pane: bool,
+    pub no_split_pane: bool,
 
     /// Enable debug-level tracing on stderr.
     #[arg(long, global = true)]
