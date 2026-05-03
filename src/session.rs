@@ -39,6 +39,7 @@ pub struct SessionOptions {
     pub ai_timeout_seconds: u32,
     pub no_redact: bool,
     pub no_ai: bool,
+    #[allow(dead_code)]
     pub no_split_pane: bool,
 }
 
@@ -181,30 +182,17 @@ pub async fn run(
     );
     let response_log = crate::ai::response_log::ResponseLog::new(&session_id);
 
-    // Renderer selection (restored to the original design):
-    //   plain mode           → no renderer (raw writes, no status bar)
-    //   AI enabled (default) → full split: log + static AI pane + status bar
-    //   AI disabled / --no-split-pane → status-bar-only: pinned status, scrollback
+    // Renderer selection:
+    //   plain mode → no renderer (raw writes, no status bar)
+    //   everything else → status-bar-only (pinned status at last row,
+    //                     log scrolls above with native scrollback intact).
+    //
+    // AI analysis is printed INLINE in the log stream now, not into a fixed
+    // pane. This lets users scroll back to see prior AI responses alongside
+    // the log context they were analyzing.
     let split_pane: Option<Arc<Mutex<SplitPaneRenderer>>> = if opts.plain {
         None
-    } else if ai_enabled && !opts.no_split_pane {
-        let (w, h) = crossterm::terminal::size().unwrap_or((80, 24));
-        let renderer = SplitPaneRenderer::new(w, h);
-        if renderer.active {
-            let _ = renderer.setup();
-            Some(Arc::new(Mutex::new(renderer)))
-        } else {
-            // Terminal too small for split — fall back to status-bar-only.
-            let renderer = SplitPaneRenderer::status_bar_only(w, h);
-            if renderer.active {
-                let _ = renderer.setup();
-                Some(Arc::new(Mutex::new(renderer)))
-            } else {
-                None
-            }
-        }
     } else {
-        // AI unavailable, or user passed --no-split-pane — pin status only.
         let (w, h) = crossterm::terminal::size().unwrap_or((80, 24));
         let renderer = SplitPaneRenderer::status_bar_only(w, h);
         if renderer.active {
@@ -215,16 +203,16 @@ pub async fn run(
         }
     };
 
-    // AI pane state (shared between consumer and renderer)
+    // AI pane state — tracks the last response / error / spinner for
+    // Ctrl+A L re-display. No initial draw needed: AI output now appears
+    // inline in the log stream when Ctrl+A A is pressed.
     let ai_pane_state: Arc<Mutex<AiPaneState>> = Arc::new(Mutex::new(AiPaneState::new()));
 
-    // Draw the initial AI pane immediately so the user sees the pinned
-    // "press Ctrl+A A to run" hint from second zero.
-    if let Some(ref sp) = split_pane {
-        if let Ok(r) = sp.lock() {
-            let ps = ai_pane_state.lock().unwrap();
-            let _ = r.draw_ai_pane(&ps);
-        }
+    // Print a one-time inline hint so the user knows Ctrl+A A is wired.
+    if ai_enabled {
+        let hint = "\x1b[33;1m  🤖 AI ready — press Ctrl+A A to analyze recent logs\x1b[0m\r\n";
+        eprint!("{hint}");
+        let _ = std::io::stderr().flush();
     }
 
     // Spawn Port_Reader
@@ -447,15 +435,15 @@ async fn ai_consumer_loop(
             _ = tokio::time::sleep(Duration::from_millis(100)) => continue,
         };
 
-        // Set spinner active
+        // Set spinner active — print inline acknowledgment so user sees
+        // the hotkey fired. The spinner line joins the log scroll stream.
         {
             let mut ps = pane_state.lock().unwrap();
             ps.set_spinner(true);
         }
         if let Some(ref sp) = split_pane {
             if let Ok(r) = sp.lock() {
-                let ps = pane_state.lock().unwrap();
-                let _ = r.draw_ai_pane(&ps);
+                let _ = r.print_ai_spinner();
             }
         }
 
@@ -501,11 +489,12 @@ async fn ai_consumer_loop(
                     ps.set_response(response.clone(), now);
                 }
 
-                // Render via split-pane if available, otherwise fallback to eprintln
+                // Render AI response INLINE in the log stream so it's fully
+                // visible, word-wrapped, and captured in terminal scrollback.
                 if let Some(ref sp) = split_pane {
                     if let Ok(r) = sp.lock() {
                         let ps = pane_state.lock().unwrap();
-                        let _ = r.draw_ai_pane(&ps);
+                        let _ = r.print_ai_inline(&ps);
                     }
                 } else {
                     let yellow = "\x1b[33;1m";
@@ -526,11 +515,11 @@ async fn ai_consumer_loop(
                 }
             }
             Err(e) => {
-                // Show the REAL error in the pane so the user can act on it.
-                // kiro-cli error messages are what the user needs to see
+                // Show the REAL error in the log stream so the user can act on
+                // it. kiro-cli error messages are what the user needs to see
                 // (e.g. "API key required", "not logged in", "timeout").
-                // Redaction already scrubbed the outgoing prompt, so
-                // stderr is only kiro-cli's own diagnostics — safe to show.
+                // Redaction already scrubbed the outgoing prompt, so stderr
+                // is only kiro-cli's own diagnostics — safe to show.
                 let display_msg = e.to_string();
                 {
                     let mut ps = pane_state.lock().unwrap();
@@ -539,7 +528,7 @@ async fn ai_consumer_loop(
                 if let Some(ref sp) = split_pane {
                     if let Ok(r) = sp.lock() {
                         let ps = pane_state.lock().unwrap();
-                        let _ = r.draw_ai_pane(&ps);
+                        let _ = r.print_ai_inline(&ps);
                     }
                 } else {
                     eprintln!("\x1b[31;1m⚠ {display_msg}\x1b[0m");
@@ -704,14 +693,11 @@ fn input_forwarder_loop(
             }
         };
 
-        // Handle resize events for split-pane
+        // Handle resize events for the status-bar scroll region.
         if let Event::Resize(w, h) = evt {
             if let Some(ref sp) = split_pane {
                 if let Ok(mut r) = sp.lock() {
                     let _ = r.on_resize(w, h);
-                    // Redraw AI pane after resize
-                    let ps = pane_state.lock().unwrap();
-                    let _ = r.draw_ai_pane(&ps);
                 }
             }
             continue;
@@ -755,16 +741,16 @@ fn input_forwarder_loop(
                 let _ = tx_ai.blocking_send(AiTrigger::Analyze);
             }
             HotkeyAction::ShowLastResponse => {
-                // Show last response in the AI pane via modal (if split-pane active)
+                // Re-print the last response inline so it scrolls into view
+                // again. This works even after many log lines have pushed
+                // the original response out of sight.
                 let ps = pane_state.lock().unwrap();
                 if ps.has_response() {
                     if let Some(ref sp) = split_pane {
-                        // Redraw the pane to show the full response
                         if let Ok(r) = sp.lock() {
-                            let _ = r.draw_ai_pane(&ps);
+                            let _ = r.print_ai_inline(&ps);
                         }
                     } else {
-                        // Fallback: print to stderr
                         let yellow = "\x1b[33;1m";
                         let reset = "\x1b[0m";
                         let dim = "\x1b[2m";

@@ -90,21 +90,33 @@ madputty kiro-status
 | `--ai-timeout-seconds` | `30` | Timeout for each AI call |
 | `--no-redact` | off | Disable credential redaction (with warning) |
 | `--no-ai` | off | Force AI off even if kiro-cli is installed |
-| `--no-split-pane` | off | Disable the split-pane AI layout (falls back to pinned status bar only). AI hotkeys still work; responses render inline. |
 
 ### Scrollback behavior
 
-By default, when `kiro-cli` is installed and you're logged in, madputty shows a **static three-region layout**:
+madputty pins **only the status bar** to the last row of the terminal. The entire area above it is the log region and participates fully in your terminal's native scrollback — scroll up with PgUp / mouse wheel to see any earlier log line, at any time, even while logs keep streaming.
 
-- Top ~80%: live log stream (scrollable inside the region)
-- Bottom ~20%: **pinned AI analysis pane** showing the latest AI response
-- Last row: pinned status bar with port / baud / rate
+### How AI appears
 
-AI responses appear in the bottom pane automatically; press **Ctrl+A A** to trigger analysis of recent logs. The AI pane is always visible so you know it's ready.
+Pressing **Ctrl+A A** during a session triggers AI analysis of the last 50 log lines. Output appears **inline** in the log stream as a clearly bordered block:
 
-If you don't want the split-pane layout (e.g. you want maximum terminal scrollback or you prefer inline AI output), pass `--no-split-pane`. The AI subsystem still works via hotkeys; responses just render between log lines instead of in a fixed pane.
+```
+─── 🤖 AI Analysis (19:25:08) ──────────────────────────────
+  The device booted normally, connected to "Ashif Airtel wifi"
+  on channel 1, and started a DING event at 19:25:08. A socket
+  read error appeared at 19:49:34 when the ding session ended;
+  this is expected RSP protocol cleanup, not a fault.
+─── end ────────────────────────────────────────────────────
+```
 
-When `kiro-cli` is not installed or not logged in, madputty automatically falls back to a pinned-status-bar layout (no AI pane).
+The full response is always printed (word-wrapped to your terminal width), so it's captured in scrollback alongside the log lines that were analyzed. No truncation, no hidden errors — if kiro-cli fails, the actual error (e.g. `KIRO_API_KEY` missing) appears inline in red.
+
+**Hotkeys:**
+
+- `Ctrl+A A` — analyze recent logs
+- `Ctrl+A L` — re-print the last response (useful if logs have scrolled it away)
+- `Ctrl+A X` — exit
+
+When kiro-cli isn't installed or API key is missing, madputty still works as a plain serial terminal — the AI hotkeys just produce an error line.
 
 ### Triggering AI analysis
 

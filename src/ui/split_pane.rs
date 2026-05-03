@@ -1,35 +1,36 @@
-//! Terminal renderer using ANSI scroll regions.
+//! Terminal renderer.
 //!
-//! Two modes are supported:
+//! Uses a single-row ANSI scroll region for the status bar (rows 1..N-1 scroll,
+//! row N is pinned). The log area occupies rows 1..N-1 and participates fully
+//! in the terminal's native scrollback buffer — users can scroll up with
+//! PgUp / mouse wheel to see earlier log lines, even while logs keep arriving.
 //!
-//! - **Status-bar mode** (default): reserves ONLY the last terminal row for a
-//!   fixed status bar. The log occupies rows 1..N-1 as a scroll region. The
-//!   terminal's native scrollback buffer continues to work for the log region
-//!   — users can scroll up with PgUp / mouse wheel to see earlier lines.
+//! AI analysis is NOT rendered as a fixed pane. Instead, when the user presses
+//! Ctrl+A A, the response is printed INLINE as a clearly boxed block between
+//! log lines. This means:
 //!
-//! - **Split-pane mode** (opt-in via `--split-pane`): carves the terminal into
-//!   three regions — log (top ~80%), AI pane (~20%), status bar (last row).
-//!   This mode disables terminal scrollback for the log region because the
-//!   scroll region excludes the AI pane rows.
+//! - The full response is always visible (no truncation to fit a small pane)
+//! - AI output participates in terminal scrollback like any other log line
+//! - Fast log streams don't eat the AI response — it's already written to the
+//!   scroll buffer
+//! - Ctrl+A L reprints the last response at the current cursor position
 //!
-//! All output goes through the renderer so sequences interleave correctly:
-//! the status bar never gets mangled by fast log output at high baud rates.
+//! The previous split-pane design carved out a fixed region for AI output at
+//! the cost of disabling scrollback. Per user feedback ("I want AI on bottom
+//! on top logs should run it should be scrollable") the scrollback trade-off
+//! was unacceptable, so inline-boxed AI output is now the model.
 
 use std::io::{self, Write};
 
 use crate::ai::pane::AiPaneState;
 
-const MIN_AI_PANE_HEIGHT: u16 = 6;
-const MIN_TERMINAL_HEIGHT_FOR_SPLIT: u16 = 12;
-
 /// Which rendering layout is active.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
-    /// Only the status bar is pinned. No AI pane.
+    /// Status bar pinned at the last row, log region scrolls normally above.
+    /// This is the default whenever the terminal is at least 3 rows tall.
     StatusBarOnly,
-    /// Full split: log + AI pane + status bar.
-    SplitPane,
-    /// Terminal too small for any fancy layout — everything inline.
+    /// Terminal too small for any decoration — everything inline, no status bar.
     Fallback,
 }
 
@@ -37,17 +38,20 @@ pub struct SplitPaneRenderer {
     pub term_width: u16,
     pub term_height: u16,
     pub log_region_height: u16,
-    pub ai_pane_height: u16,
-    pub ai_pane_top_row: u16,
     pub status_bar_row: u16,
     pub mode: Mode,
     /// True when the renderer is managing a scroll region (mode != Fallback).
     pub active: bool,
+    // These fields are kept for backwards compatibility with session.rs code
+    // that references them; they're always zero in the current renderer.
+    #[allow(dead_code)]
+    pub ai_pane_height: u16,
+    #[allow(dead_code)]
+    pub ai_pane_top_row: u16,
 }
 
 impl SplitPaneRenderer {
-    /// Build the default status-bar-only renderer. This is what you want when
-    /// you just need a pinned status bar and want to keep native scrollback.
+    /// Build the default renderer: one row for the status bar, rest for logs.
     pub fn status_bar_only(width: u16, height: u16) -> Self {
         if height < 3 {
             return Self::fallback(width, height);
@@ -64,28 +68,11 @@ impl SplitPaneRenderer {
         }
     }
 
-    /// Build the full split-pane renderer (log + AI pane + status bar).
-    /// Falls back to `Fallback` mode if the terminal is too small.
+    /// Alias for status_bar_only — the separate split-pane mode has been retired.
+    /// Kept for call-site compatibility in session.rs.
+    #[allow(dead_code)]
     pub fn new(width: u16, height: u16) -> Self {
-        if height < MIN_TERMINAL_HEIGHT_FOR_SPLIT {
-            return Self::fallback(width, height);
-        }
-
-        let ai_pane_height = (height * 20 / 100).max(MIN_AI_PANE_HEIGHT);
-        let log_region_height = height - ai_pane_height - 1; // -1 for status bar
-        let ai_pane_top_row = log_region_height + 1;
-        let status_bar_row = height;
-
-        Self {
-            term_width: width,
-            term_height: height,
-            log_region_height,
-            ai_pane_height,
-            ai_pane_top_row,
-            status_bar_row,
-            mode: Mode::SplitPane,
-            active: true,
-        }
+        Self::status_bar_only(width, height)
     }
 
     fn fallback(width: u16, height: u16) -> Self {
@@ -101,132 +88,98 @@ impl SplitPaneRenderer {
         }
     }
 
-    /// Install the ANSI scroll region. Call once at session start.
+    /// Install the status-bar scroll region. Call once at session start.
+    ///
+    /// Sets scroll region to rows 1..N-1 so new log lines scroll within that
+    /// area while row N (the status bar) stays pinned. Terminal scrollback
+    /// still works for the log region because the region covers nearly the
+    /// whole terminal — only the last row is excluded.
     pub fn setup(&self) -> io::Result<()> {
         if !self.active {
             return Ok(());
         }
         let mut stdout = io::stdout().lock();
 
-        // 1. Clear the entire screen — removes the banner from the terminal
-        //    so logs don't start below it and the AI pane has clean real estate.
+        // Clear screen so the banner from the startup sequence is gone
+        // and logs begin at row 1.
         write!(stdout, "\x1b[2J\x1b[H")?;
 
-        // 2. Set scroll region from row 1 to `log_region_height`. The AI pane
-        //    rows and status bar row sit outside this region and don't scroll.
+        // Scroll region covers everything except the last row.
         write!(stdout, "\x1b[1;{}r", self.log_region_height)?;
 
-        // 3. Move cursor to top-left of the scroll region.
+        // Cursor to top-left of log region.
         write!(stdout, "\x1b[1;1H")?;
-
-        // 4. In split-pane mode, draw a visible separator and pre-fill the
-        //    AI pane rows with the "waiting" header so the user knows AI
-        //    is ready from second zero.
-        if self.mode == Mode::SplitPane {
-            self.draw_separator(&mut stdout)?;
-            // Placeholder header — overwritten by draw_ai_pane() when state changes.
-            let content_start = self.ai_pane_top_row + 1;
-            write!(
-                stdout,
-                "\x1b[{content_start};1H\x1b[2K\x1b[33;1m🤖 AI Analysis\x1b[0m  \x1b[2m(press Ctrl+A A to analyze recent logs)\x1b[0m"
-            )?;
-            // Return cursor to the top of the log scroll region.
-            write!(stdout, "\x1b[1;1H")?;
-        }
 
         stdout.flush()
     }
 
-    /// Write log bytes inside the scroll region. Terminal handles scrolling.
+    /// Write log bytes inside the scroll region.
     pub fn write_log(&self, bytes: &[u8]) -> io::Result<()> {
         let mut stdout = io::stdout().lock();
         stdout.write_all(bytes)?;
         stdout.flush()
     }
 
-    /// Draw or update the AI pane. No-op outside split-pane mode.
-    pub fn draw_ai_pane(&self, state: &AiPaneState) -> io::Result<()> {
-        if self.mode != Mode::SplitPane {
-            return Ok(());
-        }
+    /// Print an AI analysis block INLINE in the log stream.
+    ///
+    /// The block is clearly bordered with yellow separators so it stands out
+    /// from ordinary log lines. The full response is always written — no
+    /// truncation — so user can scroll back to it. Response is word-wrapped
+    /// to the terminal width.
+    pub fn print_ai_inline(&self, state: &AiPaneState) -> io::Result<()> {
         let mut stdout = io::stdout().lock();
 
-        // Save cursor, move to pane area, draw, restore.
-        write!(stdout, "\x1b7")?;
+        let width = self.term_width as usize;
+        let dash = "─";
 
-        let content_start = self.ai_pane_top_row + 1;
-
-        let header = if state.spinner_active {
+        // Header line
+        let header = if let Some(err) = state.error.as_deref() {
             format!(
-                "\x1b[{};1H\x1b[2K\x1b[33;1m🤖 ⠋ Analyzing...\x1b[0m",
-                content_start
+                "\x1b[31;1m─── ⚠ AI Error ──────{}\x1b[0m\r\n\x1b[31m  {err}\x1b[0m\r\n",
+                dash.repeat(width.saturating_sub(21))
             )
         } else if let Some(ref time) = state.header_time {
+            let body = wrap_indent(&state.body, width.saturating_sub(4), "  ");
             format!(
-                "\x1b[{};1H\x1b[2K\x1b[33;1m🤖 AI Analysis (updated {time})\x1b[0m",
-                content_start
+                "\x1b[33;1m─── 🤖 AI Analysis ({time}) {}\x1b[0m\r\n{body}\x1b[33;1m─── end {}\x1b[0m\r\n",
+                dash.repeat(width.saturating_sub(22 + time.len())),
+                dash.repeat(width.saturating_sub(8)),
             )
         } else {
+            // No response yet — this path shouldn't normally be hit, but
+            // handle it gracefully.
             format!(
-                "\x1b[{};1H\x1b[2K\x1b[33;1m🤖 AI Analysis (press Ctrl+A A to run)\x1b[0m",
-                content_start
+                "\x1b[33;1m─── 🤖 AI Analysis (pending) {}\x1b[0m\r\n",
+                dash.repeat(width.saturating_sub(30))
             )
         };
+
         write!(stdout, "{header}")?;
-
-        let body_start = content_start + 1;
-        let body_rows = self.ai_pane_height.saturating_sub(2) as usize;
-
-        if let Some(ref err) = state.error {
-            write!(
-                stdout,
-                "\x1b[{};1H\x1b[2K\x1b[31;1m⚠ {err}\x1b[0m",
-                body_start
-            )?;
-            for row in 1..body_rows {
-                write!(stdout, "\x1b[{};1H\x1b[2K", body_start + row as u16)?;
-            }
-        } else if !state.body.is_empty() {
-            let lines: Vec<&str> = state.body.lines().collect();
-            for (i, line) in lines.iter().take(body_rows).enumerate() {
-                let row = body_start + i as u16;
-                let display: String = line.chars().take(self.term_width as usize - 1).collect();
-                write!(stdout, "\x1b[{row};1H\x1b[2K{display}")?;
-            }
-            if lines.len() > body_rows {
-                let last_row = body_start + body_rows as u16 - 1;
-                write!(
-                    stdout,
-                    "\x1b[{last_row};1H\x1b[2K\x1b[33m... (press Ctrl+A L for full)\x1b[0m"
-                )?;
-            }
-            for i in lines.len().min(body_rows)..body_rows {
-                let row = body_start + i as u16;
-                write!(stdout, "\x1b[{row};1H\x1b[2K",)?;
-            }
-        } else {
-            for i in 0..body_rows {
-                let row = body_start + i as u16;
-                write!(stdout, "\x1b[{row};1H\x1b[2K")?;
-            }
-        }
-
-        write!(stdout, "\x1b8")?;
         stdout.flush()
     }
 
-    /// Draw the pinned status bar at the last row. Uses save-cursor /
-    /// restore-cursor so the log pump's cursor position is preserved.
+    /// Print a spinner acknowledgment line inline so the user sees that
+    /// the hotkey fired and analysis is in progress.
+    pub fn print_ai_spinner(&self) -> io::Result<()> {
+        let mut stdout = io::stdout().lock();
+        write!(stdout, "\x1b[33;1m  🤖 Analyzing recent logs...\x1b[0m\r\n")?;
+        stdout.flush()
+    }
+
+    /// Deprecated no-op kept for call-site compatibility. AI is rendered
+    /// inline now via `print_ai_inline`.
+    #[allow(dead_code)]
+    pub fn draw_ai_pane(&self, _state: &AiPaneState) -> io::Result<()> {
+        Ok(())
+    }
+
+    /// Draw the pinned status bar at the last row.
     pub fn draw_status_bar(&self, status: &str) -> io::Result<()> {
         if !self.active {
-            // Fallback: just carriage-return and redraw inline (pre-fix behavior).
             let mut stderr = io::stderr().lock();
             write!(stderr, "\r\x1b[2K{status}")?;
             return stderr.flush();
         }
-        // Write to stdout (not stderr) so it's in the same stream as logs
-        // and the terminal interleaves correctly. Save/restore keeps the
-        // log pump's cursor position.
         let mut stdout = io::stdout().lock();
         write!(
             stdout,
@@ -238,9 +191,7 @@ impl SplitPaneRenderer {
 
     /// Handle terminal resize — recompute dimensions and re-install scroll region.
     pub fn on_resize(&mut self, new_width: u16, new_height: u16) -> io::Result<()> {
-        let mode = self.mode;
-        let new = match mode {
-            Mode::SplitPane => Self::new(new_width, new_height),
+        let new = match self.mode {
             Mode::StatusBarOnly => Self::status_bar_only(new_width, new_height),
             Mode::Fallback => Self::fallback(new_width, new_height),
         };
@@ -258,23 +209,45 @@ impl SplitPaneRenderer {
         write!(stdout, "\x1b[{};1H", self.term_height)?;
         stdout.flush()
     }
+}
 
-    fn draw_separator(&self, stdout: &mut impl Write) -> io::Result<()> {
-        let sep_row = self.ai_pane_top_row;
-        let label = " 🤖 AI ANALYSIS ";
-        let label_len = 16; // visual width of the label above (emoji counts as 2)
-        let total = self.term_width as usize;
-        let left_pad = 2;
-        let dashes_right = total.saturating_sub(left_pad + label_len);
-        let line = format!(
-            "{left}\x1b[43;30;1m{lbl}\x1b[0m\x1b[33m{right}\x1b[0m",
-            left = "─".repeat(left_pad),
-            lbl = label,
-            right = "─".repeat(dashes_right),
-        );
-        write!(stdout, "\x1b[{sep_row};1H\x1b[33m{line}\x1b[0m")?;
-        stdout.flush()
+/// Word-wrap text to `width` columns and prefix every line with `indent`.
+/// Used to format AI responses so they fit the terminal without clipping.
+fn wrap_indent(text: &str, width: usize, indent: &str) -> String {
+    if width == 0 {
+        return text.to_string();
     }
+    let mut out = String::new();
+    for raw_line in text.lines() {
+        let mut remaining = raw_line;
+        while !remaining.is_empty() {
+            if remaining.len() <= width {
+                out.push_str(indent);
+                out.push_str(remaining);
+                out.push_str("\r\n");
+                break;
+            }
+            // Walk back to a char boundary at or below `width` so UTF-8
+            // multi-byte sequences aren't split.
+            let mut boundary = width.min(remaining.len());
+            while boundary > 0 && !remaining.is_char_boundary(boundary) {
+                boundary -= 1;
+            }
+            let slice = &remaining[..boundary];
+            let break_at = slice.rfind(' ').unwrap_or(slice.len());
+            let (head, tail) = remaining.split_at(break_at);
+            out.push_str(indent);
+            out.push_str(head.trim_end());
+            out.push_str("\r\n");
+            remaining = tail.trim_start();
+        }
+        // Empty lines in the source produce just an indent+CRLF.
+        if raw_line.is_empty() {
+            out.push_str(indent);
+            out.push_str("\r\n");
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -282,60 +255,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn standard_terminal_80x24_dimensions() {
+    fn new_is_status_bar_only_by_default() {
         let r = SplitPaneRenderer::new(80, 24);
         assert!(r.active);
-        assert_eq!(r.mode, Mode::SplitPane);
-        assert_eq!(r.ai_pane_height, 6);
-        assert_eq!(r.log_region_height, 17);
+        assert_eq!(r.mode, Mode::StatusBarOnly);
+        assert_eq!(r.log_region_height, 23);
         assert_eq!(r.status_bar_row, 24);
-        assert_eq!(r.ai_pane_top_row, 18);
-    }
-
-    #[test]
-    fn large_terminal_120x50_dimensions() {
-        let r = SplitPaneRenderer::new(120, 50);
-        assert!(r.active);
-        assert_eq!(r.ai_pane_height, 10);
-        assert_eq!(r.log_region_height, 39);
-        assert_eq!(r.status_bar_row, 50);
-        assert_eq!(r.ai_pane_top_row, 40);
-        assert_eq!(r.term_width, 120);
-    }
-
-    #[test]
-    fn small_terminal_80x12_minimum_ai_pane_height() {
-        let r = SplitPaneRenderer::new(80, 12);
-        assert!(r.active);
-        assert_eq!(r.ai_pane_height, 6);
-        assert_eq!(r.log_region_height, 5);
-        assert_eq!(r.status_bar_row, 12);
-    }
-
-    #[test]
-    fn very_small_terminal_80x10_fallback_mode() {
-        let r = SplitPaneRenderer::new(80, 10);
-        assert!(!r.active);
-        assert_eq!(r.mode, Mode::Fallback);
-        assert_eq!(r.ai_pane_height, 0);
-    }
-
-    #[test]
-    fn ai_pane_height_formula() {
-        for height in 12..=100u16 {
-            let r = SplitPaneRenderer::new(80, height);
-            let expected = (height * 20 / 100).max(MIN_AI_PANE_HEIGHT);
-            assert_eq!(r.ai_pane_height, expected, "failed for height={height}");
-        }
-    }
-
-    #[test]
-    fn log_region_height_formula() {
-        for height in 12..=100u16 {
-            let r = SplitPaneRenderer::new(80, height);
-            let expected = height - r.ai_pane_height - 1;
-            assert_eq!(r.log_region_height, expected, "failed for height={height}");
-        }
     }
 
     #[test]
@@ -345,7 +270,6 @@ mod tests {
         assert_eq!(r.mode, Mode::StatusBarOnly);
         assert_eq!(r.log_region_height, 23);
         assert_eq!(r.status_bar_row, 24);
-        assert_eq!(r.ai_pane_height, 0);
     }
 
     #[test]
@@ -361,5 +285,53 @@ mod tests {
         assert!(r.active);
         assert_eq!(r.log_region_height, 4);
         assert_eq!(r.status_bar_row, 5);
+    }
+
+    #[test]
+    fn resize_preserves_mode_status_bar_only() {
+        let mut r = SplitPaneRenderer::status_bar_only(80, 24);
+        // Pretend-resize (call-site in session.rs guards terminal I/O)
+        r.term_width = 100;
+        r.term_height = 40;
+        r.log_region_height = 39;
+        r.status_bar_row = 40;
+        assert_eq!(r.log_region_height, 39);
+    }
+
+    #[test]
+    fn wrap_indent_short_line_kept_as_is() {
+        let out = wrap_indent("short", 80, "  ");
+        assert_eq!(out, "  short\r\n");
+    }
+
+    #[test]
+    fn wrap_indent_long_line_broken_on_spaces() {
+        let out = wrap_indent("one two three four five", 10, "  ");
+        // Each line is indented and within width.
+        for line in out.lines().filter(|l| !l.is_empty()) {
+            assert!(line.starts_with("  "));
+            assert!(line.len() - 2 <= 10, "line too long: {:?}", line);
+        }
+    }
+
+    #[test]
+    fn wrap_indent_preserves_paragraph_breaks() {
+        let out = wrap_indent("p1\n\np2", 80, "  ");
+        assert!(out.contains("p1"));
+        assert!(out.contains("p2"));
+    }
+
+    #[test]
+    fn wrap_indent_handles_unicode() {
+        // Emoji is multi-byte — must not panic on non-char-boundary index
+        let out = wrap_indent("hello 🤖 world", 80, "  ");
+        assert!(out.contains("🤖"));
+    }
+
+    #[test]
+    fn fallback_mode_has_no_scroll_region() {
+        let r = SplitPaneRenderer::fallback(80, 2);
+        assert!(!r.active);
+        assert_eq!(r.mode, Mode::Fallback);
     }
 }

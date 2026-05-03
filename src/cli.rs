@@ -68,10 +68,9 @@ pub struct Cli {
     #[arg(long)]
     pub no_ai: bool,
 
-    /// Disable the split-pane AI layout (falls back to pinned status bar only).
-    /// Use when you need maximum terminal scrollback and don't want the static
-    /// AI pane. The AI subsystem still works via hotkeys — just renders inline.
-    #[arg(long)]
+    /// Deprecated: split-pane mode has been retired in favor of inline AI
+    /// output. Kept as a silent no-op for backward compatibility with scripts.
+    #[arg(long, hide = true)]
     pub no_split_pane: bool,
 
     /// Enable debug-level tracing on stderr.

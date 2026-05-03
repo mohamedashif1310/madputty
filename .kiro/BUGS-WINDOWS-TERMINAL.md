@@ -109,6 +109,44 @@ Priority: **P0** for bug 1 and 3, **P1** for bug 2, **P2** for bug 4.
 
 ---
 
+## FIX SUMMARY (April 30, 2026, macOS side)
+
+### P0 Bug 1 (scrollback) — FIXED
+
+The split-pane scroll-region design was retired. The renderer now uses only a
+single-row scroll region (the status bar on the last row). Rows 1..N-1 are the
+log region and fully participate in the terminal's native scrollback. Users can
+scroll up with PgUp / mouse wheel to see any earlier log line, at any time,
+even while logs keep arriving.
+
+### P0 Bug 3 (AI not visible / truncated) — FIXED
+
+AI output is no longer confined to a tiny fixed pane. Pressing Ctrl+A A now:
+1. Prints a visible inline spinner line (`🤖 Analyzing recent logs...`)
+2. When the response arrives, prints a bordered inline block with the FULL
+   word-wrapped response, captured in scrollback just like a normal log line
+3. Errors (KIRO_API_KEY missing, timeout, etc.) are printed with the full
+   first line of kiro-cli's stderr, not hidden behind a generic message
+4. Ctrl+A L re-prints the last response at the current cursor position,
+   useful if logs have scrolled it out of view
+
+### P1 Bug 2 (pane wastes screen space) — FIXED AS SIDE EFFECT
+
+With the fixed pane gone, 100% of non-status vertical space is logs until the
+user actively triggers AI analysis.
+
+### P2 Bug 4 (ANSI quirks) — MITIGATED
+
+Only one feature is required now: the single-row scroll region (`\x1b[1;Nr`
+where N = height - 1). This is supported by Windows Terminal, ConHost,
+ConEmu, PowerShell ISE with VT-enabled, the VS Code integrated terminal,
+and all Unix terminals. The `--plain` flag remains available for any host
+that mishandles it.
+
+
+
+---
+
 ## Workaround (for now on Windows)
 
 Until fixed, running without AI is the cleanest path:
