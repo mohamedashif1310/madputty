@@ -156,3 +156,148 @@ cargo run -- COM66 --baud 921600 --no-ai
 ```
 
 This skips the split pane entirely and you get normal scrollable serial log output.
+
+
+---
+
+# ROUND 3 — NEW ISSUES (3 May 2026, Windows)
+
+After commit `0cd7bf7` (retire split-pane, inline AI). Tested on
+Windows 11 / Windows Terminal, COM66 @ 921600 baud, binary built
+from `.\target\release\madputty.exe`.
+
+---
+
+## Bug 5 — P0: AI banner appears ONCE at session start and never updates
+
+### Symptom
+At session start, immediately after the boot sequence finishes, the following
+line is printed exactly once and never updates:
+
+```
+🤖 AI ready — press Ctrl+A A to analyze recent logs
+```
+
+After that, serial logs stream continuously and the AI banner is scrolled
+off screen within seconds. There is no visible AI pane, no bordered inline
+block, no spinner, and no sign that AI is active.
+
+Pressing Ctrl+A A has no observable effect — **no** `🤖 Analyzing recent logs...`
+spinner line is printed, **no** response block appears, **no** error message
+appears. It is indistinguishable from the hotkey being dropped entirely.
+
+Ctrl+A X still works.
+
+### What the user saw
+- Full terminal height is used for log lines — this part is correct ✅
+- AI "ready" hint printed once before logs, then disappeared up the scrollback
+- Ctrl+A A produced nothing in the output stream over the entire 3+ minute session
+- Status bar at the bottom stayed pinned correctly ✅ (side effect: the previous
+  round's status-bar fix is working)
+
+### Likely root causes (multiple candidates — Mac should investigate)
+
+1. **Ctrl+A A not firing at all (Windows key-event duplication).**
+   Previously diagnosed in the P0 bug I filed before. The Mac commit message
+   said the split-pane retirement fixed both scrollback and AI visibility,
+   but the underlying Windows KeyEventKind duplication may still be causing
+   the dispatcher to never see the `[CTRL_A, b'a']` sequence. If so:
+   - Ctrl+A A produces NO output because `HotkeyAction::Analyze` never fires
+   - The `[AI] Analyzing recent logs...` eprintln in session.rs line ~775 never runs
+   - Mac could not have confirmed the fix because macOS does not have this
+     key-event duplication behavior
+
+2. **Ctrl+A A fires but AI task silently errors.**
+   If KIRO_API_KEY is missing, the kiro_invoker should now print the real
+   stderr inline. If this is broken:
+   - The spinner line fires but the error path does NOT print
+   - Or the error is printed to stderr while the log pump writes to stdout,
+     and the two streams interleave in ways that lose the error
+
+3. **Inline AI writes go to a stream the user does not see.**
+   If the inline block is written to stderr while the log pump writes to
+   stdout, the Windows Terminal may not render them on the same scroll
+   track. User would only see the log stream and never the AI output.
+
+### Expected
+When I press Ctrl+A A on Windows:
+
+- Within 500ms, a visible `🤖 Analyzing recent logs...` line must appear inline
+  in the log stream (stdout, not stderr)
+- Within `--ai-timeout-seconds` (default 30s), either:
+  - a bordered inline block with the full AI response, OR
+  - a visible red error line (e.g. `[AI error] KIRO_API_KEY not set. See https://...`)
+- All of the above must be captured in Windows Terminal scrollback
+
+### Debugging steps the Mac should take
+
+1. **Verify Ctrl+A A fires at all on Windows.** Add a `tracing::info!` (not
+   debug) at the top of the `HotkeyAction::Analyze` match arm in
+   `src/session.rs` so it always shows even without `--verbose`. Ask user
+   to run with the binary, press Ctrl+A A, exit, and confirm whether the
+   tracing line appeared. This distinguishes candidate 1 from 2/3.
+
+2. **Filter crossterm KeyEventKind on Windows.** In the input_forwarder
+   loop, ignore `KeyEventKind::Release`:
+   ```rust
+   if let Event::Key(ke) = &evt {
+       if ke.kind != crossterm::event::KeyEventKind::Press {
+           continue;
+       }
+   }
+   ```
+   Add a test simulating duplicate `0x01` bytes (Press then Release of
+   Ctrl+A) and confirm Analyze only fires once.
+
+3. **Verify AI inline writes go to stdout.** Grep `src/session.rs` for
+   where the inline `🤖 Analyzing...` and bordered block are printed.
+   Confirm they use `println!` / `print!` (stdout) or explicit writes to
+   `io::stdout()`, not `eprintln!`. If stderr, change to stdout.
+
+4. **Redact `--verbose` stderr from the user's log stream.** With
+   `--verbose`, tracing writes to stderr. On Windows Terminal, stderr
+   and stdout appear on the same scroll track but their ordering with
+   respect to the log pump is non-deterministic. This may explain why
+   the user did not see `[AI] Analyzing recent logs...` in the flood —
+   if it was there, it may have been buried.
+
+### Files to investigate (in order)
+1. `src/session.rs` — the input_forwarder loop and the `HotkeyAction::Analyze`
+   arm around line 772-780. Check if the acknowledgment line is written to
+   stdout or stderr.
+2. `src/io/keymap.rs` — confirm HotkeyDispatcher handles Windows Press+Release
+   byte duplication (may need a test case with `[0x01, 0x01, b'a']`).
+3. `src/ai/mod.rs` — verify the AI task's success and error paths both write
+   visible output, and to the same stream as the log pump.
+4. `src/ui/split_pane.rs` or wherever the inline AI block renderer lives now —
+   confirm it actually draws anything.
+
+### Priority
+**P0** — the core feature of madputty is still unreachable on Windows after
+the round 2 fix. The previous fix addressed UX geometry (pane size, scrollback,
+status bar) but the AI trigger path itself appears to still be broken on
+Windows specifically.
+
+---
+
+## Suggested bugfix spec for round 3
+
+Single bug: **"windows-ai-trigger-no-op-after-pane-retirement"**
+
+Bug condition `C_5(X)`: On Windows, after pressing Ctrl+A A at time T, no
+visible output is emitted to stdout within 500ms referencing AI analysis,
+a spinner, or an error. On macOS/Linux, the same action emits a visible
+`🤖 Analyzing...` line at or before T+100ms.
+
+Preservation check: Ctrl+A X still exits cleanly on Windows.
+
+Fix check: After fix, Ctrl+A A on Windows produces a visible stdout line
+(`🤖 Analyzing recent logs...` or the error variant) that appears in the
+terminal's scrollback.
+
+---
+
+## Workaround for round 3
+
+None — `--no-ai` disables the feature entirely. User cannot reach AI
+analysis from within madputty on Windows.
