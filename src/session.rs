@@ -209,10 +209,14 @@ pub async fn run(
     let ai_pane_state: Arc<Mutex<AiPaneState>> = Arc::new(Mutex::new(AiPaneState::new()));
 
     // Print a one-time inline hint so the user knows Ctrl+A A is wired.
+    // To stdout so it lands in the same scroll track as logs.
     if ai_enabled {
-        let hint = "\x1b[33;1m  🤖 AI ready — press Ctrl+A A to analyze recent logs\x1b[0m\r\n";
-        eprint!("{hint}");
-        let _ = std::io::stderr().flush();
+        let mut out = std::io::stdout().lock();
+        let _ = writeln!(
+            out,
+            "\x1b[33;1m  🤖 AI ready — press Ctrl+A A to analyze recent logs\x1b[0m\r"
+        );
+        let _ = out.flush();
     }
 
     // Spawn Port_Reader
@@ -486,27 +490,29 @@ async fn ai_consumer_loop(
                 let now = format_time_now();
                 {
                     let mut ps = pane_state.lock().unwrap();
-                    ps.set_response(response.clone(), now);
+                    ps.set_response(response.clone(), now.clone());
                 }
 
                 // Render AI response INLINE in the log stream so it's fully
                 // visible, word-wrapped, and captured in terminal scrollback.
+                // ALWAYS write to stdout (same stream as logs) so Windows
+                // Terminal orders the block correctly with respect to logs.
                 if let Some(ref sp) = split_pane {
                     if let Ok(r) = sp.lock() {
                         let ps = pane_state.lock().unwrap();
                         let _ = r.print_ai_inline(&ps);
                     }
                 } else {
-                    let yellow = "\x1b[33;1m";
-                    let reset = "\x1b[0m";
-                    let dim = "\x1b[2m";
-                    eprintln!();
-                    eprintln!("{yellow}─── 🤖 AI Analysis ───{reset}");
+                    // Plain mode — still write to stdout directly.
+                    let mut out = std::io::stdout().lock();
+                    let _ = writeln!(out, "\r");
+                    let _ = writeln!(out, "\x1b[33;1m─── 🤖 AI Analysis ({now}) ───\x1b[0m\r");
                     for line in response.lines() {
-                        eprintln!("{dim}{line}{reset}");
+                        let _ = writeln!(out, "\x1b[2m{line}\x1b[0m\r");
                     }
-                    eprintln!("{yellow}───────────────────────{reset}");
-                    eprintln!();
+                    let _ = writeln!(out, "\x1b[33;1m─── end ───\x1b[0m\r");
+                    let _ = writeln!(out, "\r");
+                    let _ = out.flush();
                 }
 
                 // Save to response log
@@ -520,6 +526,8 @@ async fn ai_consumer_loop(
                 // (e.g. "API key required", "not logged in", "timeout").
                 // Redaction already scrubbed the outgoing prompt, so stderr
                 // is only kiro-cli's own diagnostics — safe to show.
+                // ALWAYS write to stdout (same stream as logs) so error
+                // messages aren't buried by the log pump on Windows.
                 let display_msg = e.to_string();
                 {
                     let mut ps = pane_state.lock().unwrap();
@@ -531,7 +539,9 @@ async fn ai_consumer_loop(
                         let _ = r.print_ai_inline(&ps);
                     }
                 } else {
-                    eprintln!("\x1b[31;1m⚠ {display_msg}\x1b[0m");
+                    let mut out = std::io::stdout().lock();
+                    let _ = writeln!(out, "\x1b[31;1m  ⚠ AI error: {display_msg}\x1b[0m\r");
+                    let _ = out.flush();
                 }
             }
         }
@@ -703,7 +713,16 @@ fn input_forwarder_loop(
             continue;
         }
 
-        if !matches!(evt, Event::Key(_)) {
+        // On Windows, crossterm fires Key events for both Press AND Release.
+        // Without this filter, every Ctrl+A press is seen as two 0x01 bytes:
+        // one arms the dispatcher, the next disarms it, so hotkeys never fire.
+        // Filter to Press only (works identically on Unix, which never fires
+        // Release events for key-presses anyway in cooked crossterm setup).
+        if let Event::Key(key_event) = &evt {
+            if key_event.kind != crossterm::event::KeyEventKind::Press {
+                continue;
+            }
+        } else {
             continue;
         }
 
@@ -730,20 +749,43 @@ fn input_forwarder_loop(
                 break;
             }
             HotkeyAction::Analyze => {
-                // Print a visible acknowledgment so user knows the hotkey fired.
-                eprintln!("\x1b[33;1m[AI] Analyzing recent logs...\x1b[0m");
+                // Log at INFO level so --verbose captures hotkey firing.
+                // This is our first signal that the dispatcher saw Ctrl+A A.
+                tracing::info!("hotkey: Analyze triggered");
+                // Print inline acknowledgment to STDOUT (same stream as logs)
+                // so it lands in scrollback alongside the log context.
+                if let Some(ref sp) = split_pane {
+                    if let Ok(r) = sp.lock() {
+                        let _ = r.print_ai_spinner();
+                    }
+                } else {
+                    // Plain mode — still write to stdout directly.
+                    let mut out = std::io::stdout().lock();
+                    let _ = writeln!(out, "\x1b[33;1m  🤖 Analyzing recent logs...\x1b[0m\r");
+                    let _ = out.flush();
+                }
                 let _ = tx_ai.blocking_send(AiTrigger::Analyze);
             }
             HotkeyAction::AskQuestion => {
-                // Custom question input requires a text input widget (deferred).
-                // For now this acts the same as Analyze.
-                eprintln!("\x1b[33;1m[AI] Analyzing (custom questions not yet wired)...\x1b[0m");
+                tracing::info!("hotkey: AskQuestion triggered (acts as Analyze for now)");
+                if let Some(ref sp) = split_pane {
+                    if let Ok(r) = sp.lock() {
+                        let _ = r.print_ai_spinner();
+                    }
+                } else {
+                    let mut out = std::io::stdout().lock();
+                    let _ = writeln!(
+                        out,
+                        "\x1b[33;1m  🤖 Analyzing (custom Q not yet wired)...\x1b[0m\r"
+                    );
+                    let _ = out.flush();
+                }
                 let _ = tx_ai.blocking_send(AiTrigger::Analyze);
             }
             HotkeyAction::ShowLastResponse => {
-                // Re-print the last response inline so it scrolls into view
-                // again. This works even after many log lines have pushed
-                // the original response out of sight.
+                tracing::info!("hotkey: ShowLastResponse triggered");
+                // Re-print the last response inline via the renderer so it
+                // scrolls into view alongside the logs.
                 let ps = pane_state.lock().unwrap();
                 if ps.has_response() {
                     if let Some(ref sp) = split_pane {
@@ -751,19 +793,22 @@ fn input_forwarder_loop(
                             let _ = r.print_ai_inline(&ps);
                         }
                     } else {
-                        let yellow = "\x1b[33;1m";
-                        let reset = "\x1b[0m";
-                        let dim = "\x1b[2m";
-                        eprintln!();
-                        eprintln!("{yellow}─── 🤖 Last AI Response ───{reset}");
+                        let mut out = std::io::stdout().lock();
+                        let _ = writeln!(out, "\r");
+                        let _ = writeln!(out, "\x1b[33;1m─── 🤖 Last AI Response ───\x1b[0m\r");
                         for line in ps.body.lines() {
-                            eprintln!("{dim}{line}{reset}");
+                            let _ = writeln!(out, "\x1b[2m{line}\x1b[0m\r");
                         }
-                        eprintln!("{yellow}───────────────────────────{reset}");
-                        eprintln!();
+                        let _ = writeln!(out, "\x1b[33;1m───────────────────────────\x1b[0m\r");
+                        let _ = out.flush();
                     }
                 } else {
-                    eprintln!("\x1b[33m[AI] No AI response yet — press Ctrl+A A first\x1b[0m");
+                    let mut out = std::io::stdout().lock();
+                    let _ = writeln!(
+                        out,
+                        "\x1b[33m  [AI] No response yet — press Ctrl+A A first\x1b[0m\r"
+                    );
+                    let _ = out.flush();
                 }
             }
             HotkeyAction::Continue => {}

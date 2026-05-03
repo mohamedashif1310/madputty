@@ -301,3 +301,48 @@ terminal's scrollback.
 
 None — `--no-ai` disables the feature entirely. User cannot reach AI
 analysis from within madputty on Windows.
+
+---
+
+## ROUND 3 FIX SUMMARY (3 May 2026, macOS side)
+
+### P0 Bug 5 (Ctrl+A A no-op on Windows) — FIXED
+
+Three causes addressed together:
+
+**Cause A: crossterm KeyEventKind::Release duplication.**
+On Windows, crossterm fires Key events for both Press AND Release of every
+keystroke. Without filtering, each Ctrl+A keypress produced two 0x01 bytes:
+the first armed the dispatcher, the second (from Release) disarmed it and
+emitted `[CTRL_A, CTRL_A]` as forwarded bytes. The subsequent `a` press was
+then a plain 'a' — Analyze never fired.
+
+Fix: `src/session.rs` input_forwarder now rejects any `Event::Key` whose
+`kind != KeyEventKind::Press`. On Unix, Release events aren't produced for
+ordinary key input in the crossterm setup we use, so the filter is a safe
+universal guard.
+
+Regression tests in `src/io/keymap.rs`:
+- `windows_press_release_without_filter_breaks_hotkey` documents the broken
+  pre-fix behavior at the dispatcher level
+- `windows_press_only_sequence_fires_analyze` confirms the post-fix flow
+
+**Cause B: AI output written to stderr, buried by stdout log pump.**
+All AI acknowledgments, spinners, error messages, and response blocks used
+`eprintln!`. On Windows Terminal, stdout and stderr share a scroll track
+but ordering is non-deterministic at high log rates — AI output was often
+overwritten or buried.
+
+Fix: every AI output path now explicitly locks `io::stdout()` and writes
+through it, matching the log pump's stream. Uses `\r\n` line endings
+since the terminal is in raw mode.
+
+**Cause C: No visible signal when hotkey fires.**
+`tracing::info!("hotkey: Analyze triggered")` added at the top of each
+`HotkeyAction` arm. With `--verbose`, users can confirm the dispatcher is
+seeing the hotkey even if later stages fail.
+
+### Fix verification
+- `cargo test --all-features`: 147 tests pass (added 2 keymap tests)
+- `cargo clippy -- -D warnings`: clean
+- Manual user verification on Windows pending next pull

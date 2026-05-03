@@ -194,4 +194,42 @@ mod tests {
         let mut d = HotkeyDispatcher::new(true);
         assert_eq!(d.feed(&[]), HotkeyAction::Continue);
     }
+
+    /// Regression test for Windows Press+Release duplication.
+    ///
+    /// On Windows, crossterm fires a Key event for both Press AND Release
+    /// phases of each physical keystroke. Without filtering to Press-only in
+    /// the input_forwarder loop, the dispatcher sees each key twice:
+    ///
+    ///   press Ctrl+A   → feed(&[0x01]) → armed = true
+    ///   release Ctrl+A → feed(&[0x01]) → was armed, 0x01 not a hotkey so
+    ///                     emits [CTRL_A, CTRL_A] and disarms
+    ///   press A        → feed(&[b'a']) → not armed, forwarded as 'a'
+    ///
+    /// Result: Ctrl+A A never fires Analyze. This test documents the broken
+    /// sequence so the fix (filter at event layer) isn't silently regressed.
+    #[test]
+    fn windows_press_release_without_filter_breaks_hotkey() {
+        let mut d = HotkeyDispatcher::new(true);
+        // Press Ctrl+A, then release Ctrl+A (byte 0x01 twice)
+        assert_eq!(d.feed(&[CTRL_A]), HotkeyAction::Continue);
+        // Second 0x01 is not Ctrl+X, so the dispatcher disarms and emits
+        // [CTRL_A, CTRL_A] as forwarded bytes — NOT Analyze.
+        assert_eq!(
+            d.feed(&[CTRL_A]),
+            HotkeyAction::Forward(vec![CTRL_A, CTRL_A])
+        );
+        // Now pressing 'a' does nothing special.
+        assert_eq!(d.feed(b"a"), HotkeyAction::Forward(b"a".to_vec()));
+    }
+
+    /// With the Press-only event filter applied in the input_forwarder, each
+    /// keystroke reaches the dispatcher exactly once, so Ctrl+A A fires
+    /// correctly even on Windows.
+    #[test]
+    fn windows_press_only_sequence_fires_analyze() {
+        let mut d = HotkeyDispatcher::new(true);
+        // With the filter, only one 0x01 for Ctrl+A and one b'a' for A.
+        assert_eq!(d.feed(&[CTRL_A, b'a']), HotkeyAction::Analyze);
+    }
 }
